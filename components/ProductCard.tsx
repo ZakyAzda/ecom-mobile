@@ -2,22 +2,23 @@ import React from 'react';
 import {
   View,
   Text,
-  Image,
   TouchableOpacity,
   StyleSheet,
   Dimensions,
 } from 'react-native';
 import { useTheme } from '@/hooks/use-theme';
 import { BASE_URL } from '@/services/api';
+import { Image } from 'expo-image';
 
 const { width } = Dimensions.get('window');
 const CARD_WIDTH = (width - 48) / 2;
 
+// ✅ Tipe data disesuaikan dengan kolom di database PostgreSQL kamu (image_url)
 export type Product = {
   ID: number;
   name: string;
   price: number;
-  imageUrl: string;
+  image_url: string; // <-- Menggunakan snake_case sesuai kolom di database
   stock: number;
   category?: { name: string };
   description?: string;
@@ -33,15 +34,31 @@ export function formatRupiah(num: number) {
   return 'Rp ' + num.toLocaleString('id-ID');
 }
 
-function getImageUrl(url: string) {
+/**
+ * ✅ Fungsi untuk menyambungkan BASE_URL dengan path gambar dari backend.
+ * Backend Go menggunakan app.Static("/uploads", "./uploads")
+ */
+function getImageUrl(url: string | undefined) {
   if (!url) return null;
+  
+  url = url.replace('http://localhost:3000', BASE_URL).replace('https://localhost:3000', BASE_URL);
+  // Jika URL sudah berupa link lengkap (http...), langsung kembalikan
   if (url.startsWith('http')) return url;
-  return `${BASE_URL}${url}`;
+  
+  const cleanBaseUrl = BASE_URL.endsWith('/') ? BASE_URL.slice(0, -1) : BASE_URL;
+  
+  // Karena di DB kamu isinya sudah "uploads/nama_file.jpg", 
+  // kita cukup memastikan ada tanda "/" di depannya.
+  const cleanPath = url.startsWith('/') ? url : `/${url}`;
+  
+  return `${cleanBaseUrl}${cleanPath}`;
 }
 
 export default function ProductCard({ product, onPress, onAddToCart }: Props) {
-  const { C, brand, radius } = useTheme();
-  const imageUri = getImageUrl(product.imageUrl);
+  const { C, brand } = useTheme();
+  
+  // ✅ Mengambil URL gambar berdasarkan field image_url
+  const imageUri = getImageUrl(product.image_url);
 
   return (
     <TouchableOpacity
@@ -49,22 +66,30 @@ export default function ProductCard({ product, onPress, onAddToCart }: Props) {
       activeOpacity={0.92}
       onPress={() => onPress(product)}
     >
-      {/* Gambar */}
+      {/* Container Gambar */}
       <View style={[styles.imageWrapper, { backgroundColor: C.surfaceAlt }]}>
         {imageUri ? (
-          <Image source={{ uri: imageUri }} style={styles.image} resizeMode="cover" />
+          <Image 
+            source={{ uri: imageUri }} 
+            style={styles.image} 
+            contentFit="cover"
+            transition={500}
+            key={imageUri} // Memaksa re-render jika URI berubah
+          />
         ) : (
           <View style={styles.imagePlaceholder}>
             <Text style={styles.placeholderText}>📦</Text>
           </View>
         )}
 
+        {/* Badge Stok Habis */}
         {product.stock === 0 && (
           <View style={[styles.soldOutBadge, { backgroundColor: C.error }]}>
             <Text style={styles.badgeText}>Habis</Text>
           </View>
         )}
 
+        {/* Badge Kategori */}
         {product.category?.name && (
           <View style={styles.categoryBadge}>
             <Text style={styles.categoryText} numberOfLines={1}>
@@ -74,7 +99,7 @@ export default function ProductCard({ product, onPress, onAddToCart }: Props) {
         )}
       </View>
 
-      {/* Info */}
+      {/* Info Produk */}
       <View style={styles.info}>
         <Text style={[styles.name, { color: C.text }]} numberOfLines={2}>
           {product.name}
@@ -83,6 +108,7 @@ export default function ProductCard({ product, onPress, onAddToCart }: Props) {
           {formatRupiah(product.price)}
         </Text>
 
+        {/* Tombol Keranjang */}
         <TouchableOpacity
           style={[
             styles.addBtn,

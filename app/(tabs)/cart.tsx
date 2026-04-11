@@ -1,8 +1,8 @@
 import { SafeAreaView } from 'react-native-safe-area-context';
 import React, { useEffect, useState, useCallback } from 'react';
 import {
-  View, Text, FlatList, StyleSheet, TouchableOpacity, Image,
-  ActivityIndicator, Alert, StatusBar,
+  View, Text, FlatList, StyleSheet, TouchableOpacity,
+  ActivityIndicator, StatusBar,
 } from 'react-native';
 import { useRouter } from 'expo-router';
 import AsyncStorage from '@react-native-async-storage/async-storage';
@@ -10,11 +10,12 @@ import { MaterialIcons } from '@expo/vector-icons';
 import { cartAPI, BASE_URL } from '@/services/api';
 import { useTheme } from '@/hooks/use-theme';
 import { formatRupiah } from '@/components/ProductCard';
+import { Image } from 'expo-image';
 
 type CartItem = {
   ID: number;
   quantity: number;
-  product: { ID: number; name: string; price: number; imageUrl: string; stock: number };
+  product: { ID: number; name: string; price: number; image_url: string; stock: number };
 };
 
 export default function CartScreen() {
@@ -36,7 +37,7 @@ export default function CartScreen() {
     setLoading(false);
   }, []);
 
-  useEffect(() => { fetchCart(); }, []);
+  useEffect(() => { fetchCart(); }, [fetchCart]);
 
   const totalPrice = items.reduce((sum, i) => sum + i.product.price * i.quantity, 0);
 
@@ -86,12 +87,14 @@ export default function CartScreen() {
         keyExtractor={(item) => String(item.ID)}
         contentContainerStyle={styles.listContent}
         renderItem={({ item }) => {
-          const uri = item.product.imageUrl?.startsWith('http')
-            ? item.product.imageUrl
-            : `${BASE_URL}${item.product.imageUrl}`;
+          let uri = item.product.image_url || '';
+          uri = uri.replace('http://localhost:3000', BASE_URL).replace('https://localhost:3000', BASE_URL);
+          if (!uri.startsWith('http') && uri !== '') {
+            uri = `${BASE_URL}${uri.startsWith('/') ? '' : '/'}${uri}`;
+          }
           return (
             <View style={[styles.itemCard, { backgroundColor: C.surface, shadowColor: C.shadow }]}>
-              <Image source={{ uri }} style={[styles.itemImage, { backgroundColor: C.surfaceAlt }]} resizeMode="cover" />
+              <Image source={{ uri }} style={[styles.itemImage, { backgroundColor: C.surfaceAlt }]} contentFit="cover" transition={400} />
               <View style={styles.itemInfo}>
                 <Text style={[styles.itemName, { color: C.text }]} numberOfLines={2}>
                   {item.product.name}

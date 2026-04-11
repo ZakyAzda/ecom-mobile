@@ -2,7 +2,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import React, { useEffect, useState, useRef } from 'react';
 import {
   View, Text, StyleSheet, ScrollView, TouchableOpacity,
-  Image, ActivityIndicator, Alert, Dimensions, Animated,
+  ActivityIndicator, Alert, Dimensions, Animated,
   StatusBar,
 } from 'react-native';
 import { useLocalSearchParams, useRouter } from 'expo-router';
@@ -11,6 +11,7 @@ import { MaterialIcons } from '@expo/vector-icons';
 import { productAPI, cartAPI, BASE_URL } from '@/services/api';
 import { useTheme } from '@/hooks/use-theme';
 import { formatRupiah, Product } from '@/components/ProductCard';
+import { Image } from 'expo-image';
 
 const { width } = Dimensions.get('window');
 
@@ -108,9 +109,11 @@ export default function ProductDetailScreen() {
 
   if (!product) return null;
 
-  const imageUri = product.imageUrl?.startsWith('http')
-    ? product.imageUrl
-    : `${BASE_URL}${product.imageUrl}`;
+  let imageUri = product.image_url || '';
+  imageUri = imageUri.replace('http://localhost:3000', BASE_URL).replace('https://localhost:3000', BASE_URL);
+  if (!imageUri.startsWith('http') && imageUri !== '') {
+    imageUri = `${BASE_URL}${imageUri.startsWith('/') ? '' : '/'}${imageUri}`;
+  }
 
   const isOutOfStock = product.stock === 0;
   const maxQty = Math.min(product.stock, 99);
@@ -140,7 +143,7 @@ export default function ProductDetailScreen() {
         <Animated.View style={{ opacity: fadeAnim, transform: [{ scale: scaleAnim }] }}>
           <View style={[styles.imageWrapper, { backgroundColor: C.surfaceAlt }]}>
             {imageUri ? (
-              <Image source={{ uri: imageUri }} style={styles.image} resizeMode="cover" />
+              <Image source={{ uri: imageUri }} style={styles.image} contentFit="cover" transition={500} />
             ) : (
               <View style={styles.imagePlaceholder}>
                 <Text style={{ fontSize: 64 }}>📦</Text>

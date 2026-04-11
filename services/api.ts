@@ -5,7 +5,7 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 // Ganti IP ini dengan IP komputer kamu saat development (bukan localhost!)
 // Untuk emulator Android: 10.0.2.2
 // Untuk device fisik: IP LAN kamu, contoh: 192.168.1.10
-export const BASE_URL = 'http://192.168.10.22:3000';
+export const BASE_URL = 'http://10.0.2.2:3000';
 
 const api = axios.create({
   baseURL: BASE_URL,
