@@ -1,212 +1,258 @@
-import React, { useEffect, useState } from 'react';
-import { 
-  StyleSheet, 
-  Text, 
-  View, 
-  FlatList, 
-  Image, 
-  TouchableOpacity, 
-  ActivityIndicator, 
-  StatusBar, 
-  SafeAreaView 
+import { SafeAreaView } from 'react-native-safe-area-context';
+import React, { useEffect, useState, useCallback } from 'react';
+import {
+  View, Text, FlatList, StyleSheet, TextInput,
+  TouchableOpacity, ScrollView, ActivityIndicator,
+  Alert, RefreshControl, StatusBar,
 } from 'react-native';
-import axios from 'axios';
-import { MaterialIcons } from '@expo/vector-icons'; 
+import { useRouter } from 'expo-router';
+import AsyncStorage from '@react-native-async-storage/async-storage';
+import ProductCard, { Product } from '@/components/ProductCard';
+import { productAPI, cartAPI } from '@/services/api';
+import { useTheme } from '@/hooks/use-theme';
+import { MaterialIcons } from '@expo/vector-icons';
 
-const API_IP = '192.168.10.185'; 
-const API_URL = `http://${API_IP}:3000`; 
-
-const COLORS = {
-  bg_light: '#F8FAF5',
-  primary: '#10B981',
-  primary_dark: '#047857',
-  accent: '#A7F3D0',
-  text_main: '#1F2937',
-  text_sub: '#6B7280',
-  white: '#FFFFFF',
-  shadow: '#D1D5DB',
-};
-
-type Product = {
-  ID: number;
-  name: string;
-  price: number;
-  stock: number;
-  image: string; 
-};
+type Category = { ID: number; name: string };
 
 export default function HomeScreen() {
-  const [products, setProducts] = useState<Product[]>([]);
-  const [isLoading, setIsLoading] = useState(true);
-  const [isError, setIsError] = useState(false);
+  const router = useRouter();
+  const { C, brand, scheme } = useTheme();
 
-  const fetchProducts = async () => {
-    setIsLoading(true);
-    setIsError(false);
+  const [products, setProducts] = useState<Product[]>([]);
+  const [categories, setCategories] = useState<Category[]>([]);
+  const [search, setSearch] = useState('');
+  const [selectedCat, setSelectedCat] = useState('');
+  const [loading, setLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
+  const [cartCount, setCartCount] = useState(0);
+  const [isLoggedIn, setIsLoggedIn] = useState(false);
+
+  const fetchProducts = useCallback(async (q = search, cat = selectedCat) => {
     try {
-      const res = await axios.get(`${API_URL}/api/products`);
+      const res = await productAPI.getAll(q || undefined, cat || undefined);
       setProducts(res.data);
-    } catch (error: any) {
-      console.error("Detail Gagal:", error.message);
-      setIsError(true);
-    } finally {
-      setIsLoading(false);
-    }
+    } catch {}
+  }, []);
+
+  const fetchCartCount = async () => {
+    try {
+      const token = await AsyncStorage.getItem('token');
+      if (!token) return;
+      const res = await cartAPI.getMyCart();
+      setCartCount(res.data?.data?.length ?? 0);
+    } catch {}
   };
 
   useEffect(() => {
-    fetchProducts();
+    const init = async () => {
+      setLoading(true);
+      const token = await AsyncStorage.getItem('token');
+      setIsLoggedIn(!!token);
+      const res = await productAPI.getCategories().catch(() => ({ data: [] }));
+      setCategories(res.data);
+      await Promise.all([fetchProducts(), fetchCartCount()]);
+      setLoading(false);
+    };
+    init();
   }, []);
 
-  const formatRupiah = (angka: number) => {
-    return new Intl.NumberFormat('id-ID', {
-      style: 'currency',
-      currency: 'IDR',
-      minimumFractionDigits: 0,
-    }).format(angka);
+  const onRefresh = async () => {
+    setRefreshing(true);
+    await Promise.all([fetchProducts(), fetchCartCount()]);
+    setRefreshing(false);
   };
 
-  const renderProductItem = ({ item }: { item: Product }) => (
-    <View style={styles.productCard}>
-      <View style={styles.imageContainer}>
-        <Image 
-          // LOGIKA PERBAIKAN GAMBAR: Pake placeholder kalau item.image kosong/error
-          source={{ 
-            uri: item.image 
-              ? `${API_URL}/uploads/${item.image}` 
-              : 'https://via.placeholder.com/150?text=No+Image' 
-          }} 
-          style={styles.productImage}
-          resizeMode="cover"
-        />
-        <View style={styles.stockBadge}>
-          <Text style={styles.stockText}>Sisa: {item.stock}</Text>
+  const handleSearch = (text: string) => {
+    setSearch(text);
+    fetchProducts(text, selectedCat);
+  };
+
+  const handleCategory = (id: string) => {
+    const next = selectedCat === id ? '' : id;
+    setSelectedCat(next);
+    fetchProducts(search, next);
+  };
+
+  const handleAddToCart = async (product: Product) => {
+    if (!isLoggedIn) {
+      Alert.alert('Belum Login', 'Login dulu untuk menambahkan ke keranjang 🛒', [
+        { text: 'Batal', style: 'cancel' },
+        { text: 'Login', onPress: () => router.push('/(tabs)/login') },
+      ]);
+      return;
+    }
+    try {
+      await cartAPI.addToCart(product.ID, 1);
+      setCartCount((c) => c + 1);
+      Alert.alert('✅ Berhasil', `${product.name} masuk keranjang!`);
+    } catch (e: any) {
+      Alert.alert('Gagal', e.response?.data?.error ?? 'Gagal tambah ke keranjang');
+    }
+  };
+
+  const ListHeader = () => (
+    <View>
+      {/* Top Bar */}
+      <View style={styles.topBar}>
+        <View>
+          <Text style={[styles.greeting, { color: C.text }]}>Selamat Belanja 👋</Text>
+          <Text style={[styles.subtitle, { color: C.textSecondary }]}>
+            Temukan produk terbaik
+          </Text>
         </View>
-      </View>
-      
-      <View style={styles.productDetails}>
-        <Text style={styles.productName} numberOfLines={2}>
-          {item.name}
-        </Text>
-        <Text style={styles.productPrice}>
-          {formatRupiah(item.price)}
-        </Text>
-        
-        <TouchableOpacity style={styles.addButton} onPress={() => alert('Ditambah ke keranjang!')}>
-          <Text style={styles.addButtonText}>Beli</Text>
+        <TouchableOpacity
+          style={[styles.cartBtn, { backgroundColor: C.surface, shadowColor: C.shadow }]}
+          onPress={() => router.push('/cart')}
+        >
+          <MaterialIcons name="shopping-cart" size={22} color={brand.primary} />
+          {cartCount > 0 && (
+            <View style={[styles.cartBadge, { backgroundColor: C.error }]}>
+              <Text style={styles.cartBadgeText}>{cartCount > 9 ? '9+' : cartCount}</Text>
+            </View>
+          )}
         </TouchableOpacity>
       </View>
+
+      {/* Search */}
+      <View style={[styles.searchWrapper, { backgroundColor: C.surface, shadowColor: C.shadow }]}>
+        <MaterialIcons name="search" size={20} color={C.textMuted} style={{ marginRight: 8 }} />
+        <TextInput
+          style={[styles.searchInput, { color: C.text }]}
+          placeholder="Cari produk..."
+          placeholderTextColor={C.textMuted}
+          value={search}
+          onChangeText={handleSearch}
+          returnKeyType="search"
+        />
+        {search.length > 0 && (
+          <TouchableOpacity onPress={() => handleSearch('')}>
+            <MaterialIcons name="close" size={18} color={C.textMuted} />
+          </TouchableOpacity>
+        )}
+      </View>
+
+      {/* Kategori chips */}
+      <ScrollView
+        horizontal
+        showsHorizontalScrollIndicator={false}
+        contentContainerStyle={styles.catScroll}
+      >
+        {[{ ID: 0, name: 'Semua' }, ...categories].map((cat) => {
+          const id = cat.ID === 0 ? '' : String(cat.ID);
+          const active = selectedCat === id;
+          return (
+            <TouchableOpacity
+              key={cat.ID}
+              style={[
+                styles.catChip,
+                {
+                  backgroundColor: active ? brand.primary : C.surface,
+                  borderColor: active ? brand.primary : C.border,
+                },
+              ]}
+              onPress={() => handleCategory(id)}
+            >
+              <Text
+                style={[
+                  styles.catText,
+                  { color: active ? '#fff' : C.textSecondary },
+                ]}
+              >
+                {cat.name}
+              </Text>
+            </TouchableOpacity>
+          );
+        })}
+      </ScrollView>
+
+      <Text style={[styles.resultText, { color: C.textMuted }]}>
+        {products.length} produk ditemukan
+      </Text>
     </View>
   );
 
+  if (loading) {
+    return (
+      <SafeAreaView style={[styles.centered, { backgroundColor: C.background }]}>
+        <ActivityIndicator size="large" color={brand.primary} />
+        <Text style={[styles.loadingText, { color: C.textSecondary }]}>Memuat produk...</Text>
+      </SafeAreaView>
+    );
+  }
+
   return (
-    <SafeAreaView style={styles.container}>
-      <StatusBar barStyle="light-content" backgroundColor={COLORS.primary_dark} />
-      
-      <View style={styles.header}>
-        <View>
-          <Text style={styles.headerSubtitle}>Selamat Datang di</Text>
-          <Text style={styles.headerTitle}>Zaky Hidroponik 🥬</Text>
-        </View>
-        
-        {/* LOGIKA: Login dihapus, Ganti Ikon Keranjang */}
-        <TouchableOpacity onPress={() => alert('Keranjang diklik lek!')}>
-          <MaterialIcons name="shopping-cart" size={28} color={COLORS.primary_dark} />
-        </TouchableOpacity>
-      </View>
-
-      <View style={styles.searchSection}>
-          <View style={styles.searchBar}>
-              <MaterialIcons name="search" size={22} color={COLORS.text_sub} />
-              <Text style={styles.searchPlaceholder}>Cari selada, tomat...</Text>
+    <SafeAreaView style={[styles.container, { backgroundColor: C.background }]}>
+      <StatusBar barStyle={scheme === 'dark' ? 'light-content' : 'dark-content'} />
+      <FlatList
+        data={products}
+        keyExtractor={(item) => String(item.ID)}
+        numColumns={2}
+        columnWrapperStyle={styles.row}
+        contentContainerStyle={styles.listContent}
+        ListHeaderComponent={ListHeader}
+        refreshControl={
+          <RefreshControl refreshing={refreshing} onRefresh={onRefresh} colors={[brand.primary]} tintColor={brand.primary} />
+        }
+        renderItem={({ item }) => (
+          <ProductCard
+            product={item}
+            onPress={(p) => router.push({ pathname: '/product/[id]', params: { id: p.ID } } as any)}
+            onAddToCart={handleAddToCart}
+          />
+        )}
+        ListEmptyComponent={
+          <View style={styles.emptyWrapper}>
+            <Text style={styles.emptyEmoji}>🛍️</Text>
+            <Text style={[styles.emptyTitle, { color: C.text }]}>Produk tidak ditemukan</Text>
+            <Text style={[styles.emptySubtitle, { color: C.textSecondary }]}>
+              Coba kata kunci lain
+            </Text>
           </View>
-      </View>
-
-      {isLoading ? (
-        <View style={styles.centered}>
-          <ActivityIndicator size="large" color={COLORS.primary} />
-          <Text style={styles.infoText}>Sedang memanen data...</Text>
-        </View>
-      ) : isError ? (
-        <View style={styles.centered}>
-          <MaterialIcons name="error-outline" size={60} color="#EF4444" />
-          <Text style={[styles.infoText, {color: '#EF4444'}]}>Gagal ambil data, cek server Go lu lek!</Text>
-          <TouchableOpacity style={styles.retryBtn} onPress={fetchProducts}>
-              <Text style={styles.retryText}>Coba Lagi</Text>
-          </TouchableOpacity>
-        </View>
-      ) : (
-        <FlatList
-          data={products}
-          keyExtractor={(item) => item.ID.toString()}
-          renderItem={renderProductItem}
-          numColumns={2}
-          columnWrapperStyle={styles.row}
-          contentContainerStyle={styles.listContent}
-          showsVerticalScrollIndicator={false}
-        />
-      )}
+        }
+      />
     </SafeAreaView>
   );
 }
 
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: COLORS.bg_light },
-  centered: { flex: 1, justifyContent: 'center', alignItems: 'center', padding: 20 },
-  infoText: { marginTop: 10, fontSize: 16, color: COLORS.text_sub, fontWeight: '500', textAlign: 'center' },
-  header: {
-    backgroundColor: COLORS.white,
-    paddingHorizontal: 20,
-    paddingTop: 15,
-    paddingBottom: 20,
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    borderBottomLeftRadius: 25,
-    borderBottomRightRadius: 25,
-    elevation: 4,
-    zIndex: 10,
+  container: { flex: 1 },
+  centered: { flex: 1, justifyContent: 'center', alignItems: 'center', gap: 12 },
+  loadingText: { fontSize: 14 },
+  topBar: {
+    flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center',
+    paddingHorizontal: 16, paddingTop: 16, paddingBottom: 8,
   },
-  headerSubtitle: { fontSize: 14, color: COLORS.text_sub },
-  headerTitle: { fontSize: 22, fontWeight: 'bold', color: COLORS.primary_dark },
-  searchSection: { paddingHorizontal: 20, marginVertical: -15, zIndex: 20 },
-  searchBar: {
-    backgroundColor: COLORS.white,
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingHorizontal: 15,
-    paddingVertical: 12,
-    borderRadius: 15,
-    elevation: 5,
+  greeting: { fontSize: 20, fontWeight: '800' },
+  subtitle: { fontSize: 13, marginTop: 1 },
+  cartBtn: {
+    width: 44, height: 44, borderRadius: 14,
+    justifyContent: 'center', alignItems: 'center',
+    shadowOffset: { width: 0, height: 2 }, shadowOpacity: 1, shadowRadius: 8, elevation: 3,
+    position: 'relative',
   },
-  searchPlaceholder: { color: COLORS.text_sub, marginLeft: 10, fontSize: 15 },
-  listContent: { paddingHorizontal: 15, paddingTop: 30, paddingBottom: 20 },
+  cartBadge: {
+    position: 'absolute', top: -4, right: -4,
+    borderRadius: 10, minWidth: 18, height: 18,
+    justifyContent: 'center', alignItems: 'center', paddingHorizontal: 4,
+  },
+  cartBadgeText: { color: '#fff', fontSize: 10, fontWeight: '800' },
+  searchWrapper: {
+    flexDirection: 'row', alignItems: 'center',
+    marginHorizontal: 16, marginVertical: 12,
+    borderRadius: 14, paddingHorizontal: 14, paddingVertical: 10,
+    shadowOffset: { width: 0, height: 2 }, shadowOpacity: 1, shadowRadius: 8, elevation: 2,
+  },
+  searchInput: { flex: 1, fontSize: 14, padding: 0 },
+  catScroll: { paddingHorizontal: 16, paddingBottom: 4, gap: 8 },
+  catChip: {
+    borderRadius: 20, paddingHorizontal: 16, paddingVertical: 7, borderWidth: 1.5,
+  },
+  catText: { fontSize: 13, fontWeight: '600' },
+  resultText: { fontSize: 12, fontWeight: '500', paddingHorizontal: 16, paddingTop: 12, paddingBottom: 4 },
+  listContent: { paddingHorizontal: 16, paddingBottom: 100 },
   row: { justifyContent: 'space-between' },
-  productCard: {
-    backgroundColor: COLORS.white,
-    width: '48%',
-    marginBottom: 15,
-    borderRadius: 15,
-    elevation: 3,
-    overflow: 'hidden',
-  },
-  imageContainer: { width: '100%', aspectRatio: 1 },
-  productImage: { width: '100%', height: '100%', backgroundColor: '#eee' },
-  stockBadge: {
-    position: 'absolute',
-    top: 10,
-    left: 10,
-    backgroundColor: 'rgba(255, 255, 255, 0.85)',
-    paddingHorizontal: 8,
-    paddingVertical: 3,
-    borderRadius: 10,
-  },
-  stockText: { fontSize: 11, color: COLORS.primary_dark, fontWeight: 'bold' },
-  productDetails: { padding: 12 },
-  productName: { fontSize: 15, fontWeight: '600', color: COLORS.text_main, height: 36 },
-  productPrice: { fontSize: 16, fontWeight: 'bold', color: COLORS.primary, marginBottom: 8 },
-  addButton: { backgroundColor: COLORS.primary, paddingVertical: 7, borderRadius: 8, alignItems: 'center' },
-  addButtonText: { color: COLORS.white, fontWeight: 'bold', fontSize: 14 },
-  retryBtn: { marginTop: 20, backgroundColor: COLORS.primary_dark, paddingHorizontal: 20, paddingVertical: 10, borderRadius: 10 },
-  retryText: { color: COLORS.white, fontWeight: 'bold' }
+  emptyWrapper: { alignItems: 'center', paddingTop: 60, gap: 8 },
+  emptyEmoji: { fontSize: 48 },
+  emptyTitle: { fontSize: 16, fontWeight: '700' },
+  emptySubtitle: { fontSize: 13 },
 });
