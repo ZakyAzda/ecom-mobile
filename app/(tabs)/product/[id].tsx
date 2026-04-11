@@ -59,7 +59,7 @@ export default function ProductDetailScreen() {
     if (!isLoggedIn) {
       Alert.alert('Belum Login', 'Login dulu untuk menambahkan ke keranjang 🛒', [
         { text: 'Batal', style: 'cancel' },
-        { text: 'Login', onPress: () => router.push('/(tabs)/login') },
+        { text: 'Login', onPress: () => router.push('/(tabs)/login' as any) },
       ]);
       return;
     }
@@ -89,7 +89,7 @@ export default function ProductDetailScreen() {
     if (!isLoggedIn) {
       Alert.alert('Belum Login', 'Login dulu untuk membeli 🛒', [
         { text: 'Batal', style: 'cancel' },
-        { text: 'Login', onPress: () => router.push('/(tabs)/login') },
+        { text: 'Login', onPress: () => router.push('/(tabs)/login' as any) },
       ]);
       return;
     }

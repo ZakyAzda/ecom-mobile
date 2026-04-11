@@ -59,7 +59,7 @@ export default function CartScreen() {
         Login dulu untuk melihat keranjangmu
       </Text>
       <TouchableOpacity style={[styles.ctaBtn, { backgroundColor: brand.primary }]}
-        onPress={() => router.push('/(tabs)/login')}>
+        onPress={() => router.push('/(tabs)/login' as any)}>
         <Text style={styles.ctaBtnText}>Login Sekarang</Text>
       </TouchableOpacity>
     </SafeAreaView>

@@ -60,7 +60,7 @@ export default function OrdersScreen() {
       <Text style={[styles.emptyTitle, { color: C.text }]}>Belum Login</Text>
       <Text style={[styles.emptySubtitle, { color: C.textSecondary }]}>Login dulu untuk melihat pesananmu</Text>
       <TouchableOpacity style={[styles.ctaBtn, { backgroundColor: brand.primary }]}
-        onPress={() => router.push('/(tabs)/login')}>
+        onPress={() => router.push('/(tabs)/login' as any)}>
         <Text style={styles.ctaBtnText}>Login Sekarang</Text>
       </TouchableOpacity>
     </SafeAreaView>
