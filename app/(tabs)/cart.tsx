@@ -1,10 +1,11 @@
 import { SafeAreaView } from 'react-native-safe-area-context';
-import React, { useEffect, useState, useCallback } from 'react';
+import React, { useState, useCallback } from 'react';
 import {
   View, Text, FlatList, StyleSheet, TouchableOpacity,
   ActivityIndicator, StatusBar, Alert
 } from 'react-native';
 import { useRouter } from 'expo-router';
+import { useFocusEffect } from '@react-navigation/native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { MaterialIcons } from '@expo/vector-icons';
 import { cartAPI, BASE_URL } from '@/services/api';
@@ -27,6 +28,9 @@ export default function CartScreen() {
   const [loading, setLoading] = useState(true);
   const [isLoggedIn, setIsLoggedIn] = useState(false);
   const [selectedItems, setSelectedItems] = useState<Set<number>>(new Set());
+  // Track local quantity changes (cartID -> qty)
+  const [localQty, setLocalQty] = useState<Record<number, number>>({});
+  const [updatingQty, setUpdatingQty] = useState<Set<number>>(new Set());
 
   const fetchCart = useCallback(async () => {
     const token = await AsyncStorage.getItem('token');
@@ -34,12 +38,22 @@ export default function CartScreen() {
     setIsLoggedIn(true);
     try {
       const res = await cartAPI.getMyCart();
-      setItems(res.data?.data ?? []);
+      const cartItems: CartItem[] = res.data?.data ?? [];
+      setItems(cartItems);
+      // Init local qty dari server
+      const initQty: Record<number, number> = {};
+      cartItems.forEach(i => { initQty[i.ID] = i.quantity; });
+      setLocalQty(initQty);
     } catch {}
     setLoading(false);
   }, []);
 
-  useEffect(() => { fetchCart(); }, [fetchCart]);
+  // ✅ FIX: Refresh cart setiap kali screen difokus (bukan hanya saat mount)
+  useFocusEffect(
+    useCallback(() => {
+      fetchCart();
+    }, [fetchCart])
+  );
 
   const toggleSelect = (id: number) => {
     setSelectedItems(prev => {
@@ -58,10 +72,66 @@ export default function CartScreen() {
     }
   };
 
-  const handleDelete = async (id: number, cartId: number) => {
+  // Hapus item dari cart lalu tambah ulang dengan qty baru
+  // (Workaround karena backend tidak punya endpoint update qty)
+  const handleChangeQty = async (item: CartItem, delta: number) => {
+    const currentQty = localQty[item.ID] ?? item.quantity;
+    const newQty = currentQty + delta;
+
+    if (newQty < 1) return;
+    if (newQty > item.product.stock) {
+      Alert.alert('Stok Tidak Cukup', `Stok tersedia: ${item.product.stock}`);
+      return;
+    }
+
+    // Optimistic update UI
+    setLocalQty(prev => ({ ...prev, [item.ID]: newQty }));
+    setUpdatingQty(prev => new Set(prev).add(item.ID));
+
+    try {
+      // Hapus cart lama, buat baru dengan qty baru
+      await cartAPI.removeFromCart(item.ID);
+      const addRes = await cartAPI.addToCart(item.product.ID, newQty);
+
+      // Refresh cart untuk dapat ID baru dari server
+      const res = await cartAPI.getMyCart();
+      const newItems: CartItem[] = res.data?.data ?? [];
+      setItems(newItems);
+
+      // Rebuild localQty & selectedItems dengan ID baru
+      const updatedQty: Record<number, number> = {};
+      newItems.forEach(i => { updatedQty[i.ID] = i.quantity; });
+      setLocalQty(updatedQty);
+
+      // Cari item yang baru (product ID sama)
+      const newItem = newItems.find(i => i.product.ID === item.product.ID);
+      if (newItem) {
+        setSelectedItems(prev => {
+          const wasSelected = prev.has(item.ID);
+          const next = new Set(prev);
+          next.delete(item.ID);
+          if (wasSelected) next.add(newItem.ID);
+          return next;
+        });
+      }
+    } catch (e: any) {
+      // Rollback jika gagal
+      setLocalQty(prev => ({ ...prev, [item.ID]: currentQty }));
+      Alert.alert('Gagal', 'Gagal mengubah jumlah item');
+    } finally {
+      setUpdatingQty(prev => {
+        const next = new Set(prev);
+        next.delete(item.ID);
+        return next;
+      });
+    }
+  };
+
+  const handleDelete = async (productId: number, cartId: number) => {
     try {
       await cartAPI.removeFromCart(cartId);
       setItems(prev => prev.filter(item => item.ID !== cartId));
+      setLocalQty(prev => { const next = { ...prev }; delete next[cartId]; return next; });
       setSelectedItems(prev => {
         const newSet = new Set(prev);
         newSet.delete(cartId);
@@ -74,12 +144,16 @@ export default function CartScreen() {
 
   const totalPrice = items
     .filter(i => selectedItems.has(i.ID))
-    .reduce((sum, i) => sum + i.product.price * i.quantity, 0);
+    .reduce((sum, i) => sum + i.product.price * (localQty[i.ID] ?? i.quantity), 0);
 
   const handleCheckout = () => {
-    if (selectedItems.size === 0) { Alert.alert('Pilih Produk', 'Pilih minimal satu produk untuk di-checkout!'); return; }
+    if (selectedItems.size === 0) {
+      Alert.alert('Pilih Produk', 'Pilih minimal satu produk untuk di-checkout!');
+      return;
+    }
+    // ✅ FIX: Kirim cart_ids yang benar + total harga
     const cartIds = Array.from(selectedItems).join(',');
-    router.push({ pathname: '/checkout', params: { from: 'cart', cart_ids: cartIds } } as any);
+    router.push({ pathname: '/checkout', params: { from: 'cart', cart_ids: cartIds, total: String(totalPrice) } } as any);
   };
 
   if (loading) return (
@@ -109,105 +183,164 @@ export default function CartScreen() {
       <SafeAreaView style={[styles.container, { backgroundColor: C.background }]} edges={['top', 'left', 'right']}>
         <StatusBar barStyle={scheme === 'dark' ? 'light-content' : 'dark-content'} backgroundColor={C.background} />
 
-      {/* Header */}
-      <View style={[styles.header, { backgroundColor: C.surface, borderBottomColor: C.border }]}>
-        <TouchableOpacity
-          style={[styles.backBtn, { backgroundColor: C.surfaceAlt }]}
-          onPress={() => router.back()}
-        >
-          <MaterialIcons name="arrow-back" size={20} color={C.text} />
-        </TouchableOpacity>
-        <Text style={[styles.headerTitle, { color: C.text }]}>Keranjang</Text>
-        <Text style={[styles.headerCount, { color: C.textSecondary }]}>{items.length} item</Text>
-      </View>
-      
-      {/* Select All Row */}
-      {items.length > 0 && (
-        <View style={[styles.selectAllRow, { backgroundColor: C.surface, borderBottomColor: C.border }]}>
-          <TouchableOpacity style={styles.checkboxContainer} onPress={toggleSelectAll}>
-             <View style={[styles.checkbox, isAllSelected && { backgroundColor: brand.primary, borderColor: brand.primary }]}>
-               {isAllSelected && <MaterialIcons name="check" size={16} color="#fff" />}
-             </View>
-             <Text style={[styles.selectAllText, { color: C.text }]}>Pilih Semua</Text>
+        {/* Header */}
+        <View style={[styles.header, { backgroundColor: C.surface, borderBottomColor: C.border }]}>
+          <TouchableOpacity
+            style={[styles.backBtn, { backgroundColor: C.surfaceAlt }]}
+            onPress={() => router.back()}
+          >
+            <MaterialIcons name="arrow-back" size={20} color={C.text} />
           </TouchableOpacity>
+          <Text style={[styles.headerTitle, { color: C.text }]}>Keranjang</Text>
+          <Text style={[styles.headerCount, { color: C.textSecondary }]}>{items.length} item</Text>
         </View>
-      )}
 
-      <FlatList
-        data={items}
-        keyExtractor={(item) => String(item.ID)}
-        contentContainerStyle={styles.listContent}
-        renderItem={({ item }) => {
-          let uri = item.product.image_url || '';
-          uri = uri.replace('http://localhost:3000', BASE_URL).replace('https://localhost:3000', BASE_URL);
-          if (!uri.startsWith('http') && uri !== '') {
-            uri = `${BASE_URL}${uri.startsWith('/') ? '' : '/'}${uri}`;
-          }
-          const isSelected = selectedItems.has(item.ID);
-          
-          return (
-            <Swipeable
-              renderRightActions={() => (
-                <TouchableOpacity style={styles.deleteAction} onPress={() => handleDelete(item.product.ID, item.ID)}>
-                  <MaterialIcons name="delete" size={28} color="#fff" />
-                  <Text style={styles.deleteText}>Hapus</Text>
-                </TouchableOpacity>
-              )}
-            >
-              <View style={[styles.itemCardWrapper, { backgroundColor: C.surface, shadowColor: C.shadow }]}>
-                <TouchableOpacity style={styles.checkboxContainer} onPress={() => toggleSelect(item.ID)}>
-                   <View style={[styles.checkbox, isSelected && { backgroundColor: brand.primary, borderColor: brand.primary }]}>
-                     {isSelected && <MaterialIcons name="check" size={16} color="#fff" />}
-                   </View>
-                </TouchableOpacity>
-                <Image source={{ uri }} style={[styles.itemImage, { backgroundColor: C.surfaceAlt }]} contentFit="cover" transition={400} />
-                <View style={styles.itemInfo}>
-                  <Text style={[styles.itemName, { color: C.text }]} numberOfLines={2}>
-                    {item.product.name}
-                  </Text>
-                  <Text style={[styles.itemPrice, { color: brand.primary }]}>
-                    {formatRupiah(item.product.price)}
-                  </Text>
-                  <View style={[styles.qtyBadge, { backgroundColor: C.surfaceAlt }]}>
-                    <Text style={[styles.qtyText, { color: C.textSecondary }]}>Qty: {item.quantity}</Text>
-                  </View>
-                </View>
+        {/* Select All Row */}
+        {items.length > 0 && (
+          <View style={[styles.selectAllRow, { backgroundColor: C.surface, borderBottomColor: C.border }]}>
+            <TouchableOpacity style={styles.checkboxContainer} onPress={toggleSelectAll}>
+              <View style={[styles.checkbox, isAllSelected && { backgroundColor: brand.primary, borderColor: brand.primary }]}>
+                {isAllSelected && <MaterialIcons name="check" size={16} color="#fff" />}
               </View>
-            </Swipeable>
-          );
-        }}
-        ListEmptyComponent={
-          <View style={styles.emptyWrapper}>
-            <MaterialIcons name="shopping-cart" size={52} color={C.textMuted} />
-            <Text style={[styles.emptyTitle, { color: C.text }]}>Keranjang Kosong</Text>
-            <Text style={[styles.emptySubtitle, { color: C.textSecondary }]}>Yuk mulai belanja!</Text>
-            <TouchableOpacity style={[styles.ctaBtn, { backgroundColor: brand.primary }]}
-              onPress={() => router.push('/(tabs)')}>
-              <Text style={styles.ctaBtnText}>Lihat Produk</Text>
+              <Text style={[styles.selectAllText, { color: C.text }]}>Pilih Semua</Text>
             </TouchableOpacity>
           </View>
-        }
-      />
+        )}
 
-      {/* Bottom bar */}
-      {items.length > 0 && (
-        <View style={[styles.checkoutBar, { backgroundColor: C.surface, borderTopColor: C.border }]}>
-          <View style={styles.totalContainer}>
-            <Text style={[styles.totalLabel, { color: C.textMuted }]}>Perkiraan Harga</Text>
-            <Text style={[styles.totalAmount, { color: brand.primary }]}>{formatRupiah(totalPrice)}</Text>
+        <FlatList
+          data={items}
+          keyExtractor={(item) => String(item.ID)}
+          contentContainerStyle={styles.listContent}
+          renderItem={({ item }) => {
+            let uri = item.product.image_url || '';
+            uri = uri.replace('http://localhost:3000', BASE_URL).replace('https://localhost:3000', BASE_URL);
+            if (!uri.startsWith('http') && uri !== '') {
+              uri = `${BASE_URL}${uri.startsWith('/') ? '' : '/'}${uri}`;
+            }
+            const isSelected = selectedItems.has(item.ID);
+            const qty = localQty[item.ID] ?? item.quantity;
+            const isUpdating = updatingQty.has(item.ID);
+
+            return (
+              <Swipeable
+                renderRightActions={() => (
+                  <TouchableOpacity
+                    style={styles.deleteAction}
+                    onPress={() => handleDelete(item.product.ID, item.ID)}
+                  >
+                    <MaterialIcons name="delete" size={28} color="#fff" />
+                    <Text style={styles.deleteText}>Hapus</Text>
+                  </TouchableOpacity>
+                )}
+              >
+                <View style={[styles.itemCardWrapper, { backgroundColor: C.surface, shadowColor: C.shadow }]}>
+                  {/* Checkbox */}
+                  <TouchableOpacity style={styles.checkboxContainer} onPress={() => toggleSelect(item.ID)}>
+                    <View style={[styles.checkbox, isSelected && { backgroundColor: brand.primary, borderColor: brand.primary }]}>
+                      {isSelected && <MaterialIcons name="check" size={16} color="#fff" />}
+                    </View>
+                  </TouchableOpacity>
+
+                  {/* Gambar */}
+                  <Image
+                    source={{ uri }}
+                    style={[styles.itemImage, { backgroundColor: C.surfaceAlt }]}
+                    contentFit="cover"
+                    transition={400}
+                  />
+
+                  {/* Info */}
+                  <View style={styles.itemInfo}>
+                    <Text style={[styles.itemName, { color: C.text }]} numberOfLines={2}>
+                      {item.product.name}
+                    </Text>
+                    <Text style={[styles.itemPrice, { color: brand.primary }]}>
+                      {formatRupiah(item.product.price)}
+                    </Text>
+
+                    {/* ✅ Tombol tambah/kurang qty */}
+                    <View style={styles.qtyRow}>
+                      <TouchableOpacity
+                        style={[
+                          styles.qtyBtn,
+                          { borderColor: C.border, backgroundColor: C.surfaceAlt },
+                          (qty <= 1 || isUpdating) && styles.qtyBtnDisabled,
+                        ]}
+                        onPress={() => handleChangeQty(item, -1)}
+                        disabled={qty <= 1 || isUpdating}
+                      >
+                        <MaterialIcons name="remove" size={14} color={qty <= 1 ? C.textMuted : C.text} />
+                      </TouchableOpacity>
+
+                      <View style={[styles.qtyValueBox, { backgroundColor: C.surfaceAlt }]}>
+                        {isUpdating ? (
+                          <ActivityIndicator size="small" color={brand.primary} />
+                        ) : (
+                          <Text style={[styles.qtyValue, { color: C.text }]}>{qty}</Text>
+                        )}
+                      </View>
+
+                      <TouchableOpacity
+                        style={[
+                          styles.qtyBtn,
+                          { borderColor: C.border, backgroundColor: C.surfaceAlt },
+                          (qty >= item.product.stock || isUpdating) && styles.qtyBtnDisabled,
+                        ]}
+                        onPress={() => handleChangeQty(item, +1)}
+                        disabled={qty >= item.product.stock || isUpdating}
+                      >
+                        <MaterialIcons name="add" size={14} color={qty >= item.product.stock ? C.textMuted : brand.primary} />
+                      </TouchableOpacity>
+
+                      <Text style={[styles.stockHint, { color: C.textMuted }]}>
+                        Stok: {item.product.stock}
+                      </Text>
+                    </View>
+
+                    {/* Subtotal per item */}
+                    <Text style={[styles.subtotal, { color: C.textSecondary }]}>
+                      Subtotal: {formatRupiah(item.product.price * qty)}
+                    </Text>
+                  </View>
+                </View>
+              </Swipeable>
+            );
+          }}
+          ListEmptyComponent={
+            <View style={styles.emptyWrapper}>
+              <MaterialIcons name="shopping-cart" size={52} color={C.textMuted} />
+              <Text style={[styles.emptyTitle, { color: C.text }]}>Keranjang Kosong</Text>
+              <Text style={[styles.emptySubtitle, { color: C.textSecondary }]}>Yuk mulai belanja!</Text>
+              <TouchableOpacity style={[styles.ctaBtn, { backgroundColor: brand.primary }]}
+                onPress={() => router.push('/(tabs)')}>
+                <Text style={styles.ctaBtnText}>Lihat Produk</Text>
+              </TouchableOpacity>
+            </View>
+          }
+        />
+
+        {/* Bottom bar */}
+        {items.length > 0 && (
+          <View style={[styles.checkoutBar, { backgroundColor: C.surface, borderTopColor: C.border }]}>
+            <View style={styles.totalContainer}>
+              <Text style={[styles.totalLabel, { color: C.textMuted }]}>Total Harga</Text>
+              <Text style={[styles.totalAmount, { color: brand.primary }]}>{formatRupiah(totalPrice)}</Text>
+            </View>
+            <TouchableOpacity
+              style={[
+                styles.checkoutBtn,
+                { backgroundColor: selectedItems.size > 0 ? brand.primary : C.surfaceAlt, shadowColor: brand.primary },
+              ]}
+              onPress={handleCheckout}
+              disabled={selectedItems.size === 0}
+            >
+              <Text style={[styles.checkoutBtnText, { color: selectedItems.size > 0 ? '#fff' : C.textMuted }]}>
+                Checkout ({selectedItems.size})
+              </Text>
+              <MaterialIcons name="arrow-forward" size={18} color={selectedItems.size > 0 ? '#fff' : C.textMuted} />
+            </TouchableOpacity>
           </View>
-          <TouchableOpacity
-            style={[styles.checkoutBtn, { backgroundColor: selectedItems.size > 0 ? brand.primary : C.surfaceAlt, shadowColor: brand.primary }]}
-            onPress={handleCheckout}
-            disabled={selectedItems.size === 0}
-          >
-            <Text style={[styles.checkoutBtnText, { color: selectedItems.size > 0 ? '#fff' : C.textMuted }]}>
-              Checkout ({selectedItems.size})
-            </Text>
-            <MaterialIcons name="arrow-forward" size={18} color={selectedItems.size > 0 ? '#fff' : C.textMuted} />
-          </TouchableOpacity>
-        </View>
-      )}
+        )}
       </SafeAreaView>
     </GestureHandlerRootView>
   );
@@ -230,30 +363,45 @@ const styles = StyleSheet.create({
   selectAllText: { fontSize: 14, fontWeight: '600' },
   listContent: { padding: 16, gap: 12, paddingBottom: 120 },
   deleteAction: {
-    backgroundColor: '#FF3B30', 
-    justifyContent: 'center', 
-    alignItems: 'center', 
-    width: 80, 
-    height: '100%', 
+    backgroundColor: '#FF3B30',
+    justifyContent: 'center',
+    alignItems: 'center',
+    width: 80,
+    height: '100%',
     borderRadius: 16,
     marginLeft: 8,
   },
   deleteText: { color: '#fff', fontSize: 12, fontWeight: '600', marginTop: 4 },
   itemCardWrapper: {
-    flexDirection: 'row', borderRadius: 16, padding: 12, alignItems: 'center', gap: 12,
+    flexDirection: 'row', borderRadius: 16, padding: 12, alignItems: 'flex-start', gap: 10,
     shadowOffset: { width: 0, height: 2 }, shadowOpacity: 1, shadowRadius: 8, elevation: 2,
   },
-  checkboxContainer: { padding: 4, marginRight: 4, flexDirection: 'row', alignItems: 'center', gap: 8 },
-  checkbox: { 
+  checkboxContainer: { padding: 4, marginRight: 2, flexDirection: 'row', alignItems: 'center', gap: 8 },
+  checkbox: {
     width: 22, height: 22, borderRadius: 6, borderWidth: 2, borderColor: '#ccc',
-    justifyContent: 'center', alignItems: 'center'
+    justifyContent: 'center', alignItems: 'center',
   },
   itemImage: { width: 72, height: 72, borderRadius: 12 },
   itemInfo: { flex: 1, gap: 4 },
   itemName: { fontSize: 13, fontWeight: '600', lineHeight: 18 },
   itemPrice: { fontSize: 13, fontWeight: '700' },
-  qtyBadge: { borderRadius: 8, paddingHorizontal: 8, paddingVertical: 3, alignSelf: 'flex-start' },
-  qtyText: { fontSize: 12, fontWeight: '600' },
+
+  // Qty controls
+  qtyRow: { flexDirection: 'row', alignItems: 'center', gap: 6, marginTop: 4 },
+  qtyBtn: {
+    width: 28, height: 28, borderRadius: 8, borderWidth: 1.5,
+    justifyContent: 'center', alignItems: 'center',
+  },
+  qtyBtnDisabled: { opacity: 0.35 },
+  qtyValueBox: {
+    width: 32, height: 28, borderRadius: 8,
+    justifyContent: 'center', alignItems: 'center',
+  },
+  qtyValue: { fontSize: 13, fontWeight: '800', textAlign: 'center' },
+  stockHint: { fontSize: 10, marginLeft: 2 },
+
+  subtotal: { fontSize: 11, fontWeight: '600', marginTop: 2 },
+
   emptyWrapper: { alignItems: 'center', paddingTop: 80, gap: 10 },
   emptyTitle: { fontSize: 18, fontWeight: '800' },
   emptySubtitle: { fontSize: 14 },
