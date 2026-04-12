@@ -90,6 +90,11 @@ function CustomTabBar({ state, descriptors, navigation, C }: any) {
   const insets = useSafeAreaInsets();
   const expectedOrder = ['index', 'order', 'profile'];
   
+  const currentRoute = state.routes[state.index];
+  const showTabBar = expectedOrder.includes(currentRoute.name);
+
+  if (!showTabBar) return null;
+
   const visibleRoutes = state.routes
     .filter((route: any) => expectedOrder.includes(route.name))
     .sort((a: any, b: any) => expectedOrder.indexOf(a.name) - expectedOrder.indexOf(b.name));

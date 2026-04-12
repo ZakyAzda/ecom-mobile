@@ -65,6 +65,9 @@ export const cartAPI = {
 
   addToCart: (product_id: number, quantity: number) =>
     api.post('/api/cart', { product_id, quantity }),
+
+  removeFromCart: (cart_id: number) =>
+    api.delete(`/api/cart/${cart_id}`),
 };
 
 // ─── ORDERS ───────────────────────────────────────────────────────────────────
