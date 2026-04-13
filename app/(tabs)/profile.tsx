@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import {
   View, Text, TextInput, TouchableOpacity, StyleSheet,
   Alert, ActivityIndicator, ScrollView, KeyboardAvoidingView,
-  Platform, StatusBar,
+  Platform, StatusBar, Linking,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { MaterialIcons } from '@expo/vector-icons';
@@ -12,6 +12,10 @@ import { useRouter } from 'expo-router';
 
 type Mode = 'login' | 'register';
 type UserInfo = { name: string; role: string; email?: string };
+
+// Nomor WhatsApp yang akan dihubungi (ganti dengan nomor aktif)
+const WA_NUMBER = '6281234567890'; // Format: 62XXXXXXXXXX (tanpa tanda +)
+const WA_MESSAGE = 'Halo, saya butuh bantuan dengan aplikasi GreenMart.';
 
 export default function LoginScreen() {
   const { C, brand, scheme } = useTheme();
@@ -70,6 +74,18 @@ export default function LoginScreen() {
     ]);
   };
 
+  const handleContactWA = () => {
+    const url = `whatsapp://send?phone=${WA_NUMBER}&text=${encodeURIComponent(WA_MESSAGE)}`;
+    Linking.canOpenURL(url).then(supported => {
+      if (supported) {
+        Linking.openURL(url);
+      } else {
+        // Fallback ke web WhatsApp
+        Linking.openURL(`https://wa.me/${WA_NUMBER}?text=${encodeURIComponent(WA_MESSAGE)}`);
+      }
+    });
+  };
+
   const switchMode = (m: Mode) => {
     setMode(m); setName(''); setEmail(''); setPassword(''); setWhatsapp('');
   };
@@ -105,10 +121,41 @@ export default function LoginScreen() {
           {/* Menu */}
           <View style={[styles.menuCard, { backgroundColor: C.surface, shadowColor: C.shadow }]}>
             <Text style={[styles.menuTitle, { color: C.textMuted }]}>AKUN SAYA</Text>
-            <MenuRow icon="inventory-2" label="Pesanan Saya" C={C} onPress={() => router.push('/(tabs)/orders' as any)} />
-            <MenuRow icon="shopping-cart" label="Keranjang Belanja" C={C} onPress={() => router.push('/cart')} />
-            <MenuRow icon="location-on" label="Alamat Pengiriman" C={C} onPress={() => {}} />
-            <MenuRow icon="support-agent" label="Hubungi Kami" C={C} onPress={() => {}} last />
+
+            {/* Ubah Password */}
+            <MenuRow
+              icon="lock-outline"
+              label="Ubah Password"
+              C={C}
+              onPress={() => router.push('/(tabs)/change-password' as any)}
+            />
+
+            {/* Keranjang Belanja */}
+            <MenuRow
+              icon="shopping-cart"
+              label="Keranjang Belanja"
+              C={C}
+              onPress={() => router.push('/cart')}
+            />
+
+            {/* Alamat Pengiriman */}
+            <MenuRow
+              icon="location-on"
+              label="Alamat Pengiriman"
+              C={C}
+              onPress={() => router.push('/(tabs)/addresses' as any)}
+            />
+
+            {/* Hubungi Kami via WhatsApp */}
+            <MenuRow
+              icon="support-agent"
+              label="Hubungi Kami"
+              subtitle="Chat via WhatsApp"
+              C={C}
+              onPress={handleContactWA}
+              last
+              accentColor="#25D366"
+            />
           </View>
 
           {/* Logout */}
@@ -235,14 +282,19 @@ function Field({ label, icon, value, onChangeText, placeholder, keyboardType, au
   );
 }
 
-function MenuRow({ icon, label, onPress, C, last }: any) {
+function MenuRow({ icon, label, subtitle, onPress, C, last, accentColor }: any) {
   return (
     <TouchableOpacity
       style={[styles.menuRow, !last && { borderBottomWidth: 1, borderBottomColor: C.borderLight }]}
       onPress={onPress} activeOpacity={0.7}
     >
-      <MaterialIcons name={icon} size={22} color={C.textSecondary} />
-      <Text style={[styles.menuRowLabel, { color: C.text }]}>{label}</Text>
+      <MaterialIcons name={icon} size={22} color={accentColor ?? C.textSecondary} />
+      <View style={{ flex: 1 }}>
+        <Text style={[styles.menuRowLabel, { color: C.text }]}>{label}</Text>
+        {subtitle && (
+          <Text style={[styles.menuRowSub, { color: accentColor ?? C.textMuted }]}>{subtitle}</Text>
+        )}
+      </View>
       <MaterialIcons name="chevron-right" size={22} color={C.textMuted} />
     </TouchableOpacity>
   );
@@ -272,7 +324,8 @@ const styles = StyleSheet.create({
     padding: 16, paddingBottom: 8,
   },
   menuRow: { flexDirection: 'row', alignItems: 'center', padding: 16, gap: 12 },
-  menuRowLabel: { flex: 1, fontSize: 15, fontWeight: '600' },
+  menuRowLabel: { fontSize: 15, fontWeight: '600' },
+  menuRowSub: { fontSize: 11, marginTop: 1, fontWeight: '500' },
   logoutBtn: {
     borderRadius: 16, padding: 16, alignItems: 'center',
     borderWidth: 1.5, flexDirection: 'row', justifyContent: 'center', gap: 8,
