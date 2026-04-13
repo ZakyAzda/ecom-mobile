@@ -8,10 +8,9 @@ import {
   PayMethod, SavedAddress, CheckoutParams, STORAGE_KEY_ADDRESSES,
 } from './checkout.types';
 
-// ─── Helpers ──────────────────────────────────────────────────────────────────
-
-function parseCartIds(raw: string): number[] {
-  return raw
+function parseCartIds(raw: string | string[]): number[] {
+  const str = Array.isArray(raw) ? raw.join(',') : raw;
+  return str
     .split(',')
     .map(s => parseInt(s.trim(), 10))
     .filter(n => !isNaN(n) && n > 0);
@@ -21,28 +20,25 @@ function generateId(): string {
   return Date.now().toString(36) + Math.random().toString(36).slice(2);
 }
 
-// ─── Hook ─────────────────────────────────────────────────────────────────────
-
 export function useCheckout(params: CheckoutParams) {
   const router = useRouter();
 
-  // ── Address state ──────────────────────────────────────────────────────────
   const [savedAddresses, setSavedAddresses] = useState<SavedAddress[]>([]);
   const [selectedAddressId, setSelectedAddressId] = useState<string | null>(null);
   const [showAddressForm, setShowAddressForm] = useState(false);
   const [editingAddress, setEditingAddress] = useState<SavedAddress | null>(null);
 
-  // ── Form state ─────────────────────────────────────────────────────────────
   const [formLabel, setFormLabel] = useState('');
   const [formDetail, setFormDetail] = useState('');
   const [formLat, setFormLat] = useState<number | undefined>();
   const [formLng, setFormLng] = useState<number | undefined>();
 
-  // ── Payment ────────────────────────────────────────────────────────────────
   const [payMethod, setPayMethod] = useState<PayMethod>('COD');
   const [loading, setLoading] = useState(false);
 
-  // ── Load addresses dari storage ────────────────────────────────────────────
+  // State untuk success modal
+  const [showSuccess, setShowSuccess] = useState(false);
+
   const loadAddresses = useCallback(async () => {
     try {
       const raw = await AsyncStorage.getItem(STORAGE_KEY_ADDRESSES);
@@ -62,7 +58,6 @@ export function useCheckout(params: CheckoutParams) {
     await AsyncStorage.setItem(STORAGE_KEY_ADDRESSES, JSON.stringify(list));
   };
 
-  // ── Form actions ───────────────────────────────────────────────────────────
   const openAddForm = () => {
     setEditingAddress(null);
     setFormLabel('');
@@ -86,7 +81,6 @@ export function useCheckout(params: CheckoutParams) {
     setEditingAddress(null);
   };
 
-  // ── Simpan alamat ──────────────────────────────────────────────────────────
   const saveAddress = async () => {
     if (!formLabel.trim()) {
       Alert.alert('Label Kosong', 'Isi label alamat dulu, contoh: Rumah, Kantor');
@@ -122,7 +116,6 @@ export function useCheckout(params: CheckoutParams) {
     closeForm();
   };
 
-  // ── Hapus alamat ───────────────────────────────────────────────────────────
   const deleteAddress = (addressId: string) => {
     Alert.alert('Hapus Alamat', 'Yakin mau hapus alamat ini?', [
       { text: 'Batal', style: 'cancel' },
@@ -140,14 +133,11 @@ export function useCheckout(params: CheckoutParams) {
     ]);
   };
 
-  // ── Set koordinat dari MapPicker ───────────────────────────────────────────
-  // signature: (lat, lng, reverseGeocodedAddress)
   const setMapCoords = (lat: number, lng: number, _address: string) => {
     setFormLat(lat);
     setFormLng(lng);
   };
 
-  // ── Submit checkout ────────────────────────────────────────────────────────
   const submitCheckout = async () => {
     const selectedAddress = savedAddresses.find(a => a.id === selectedAddressId);
     if (!selectedAddress) {
@@ -155,22 +145,28 @@ export function useCheckout(params: CheckoutParams) {
       return;
     }
 
-    // ✅ FIX: Build payload dengan benar
     const payload: any = {
       address: selectedAddress.detail,
       payment_method: payMethod,
     };
 
-    if (params.from === 'cart' && params.cart_ids) {
-      const parsedIds = parseCartIds(params.cart_ids);
+    const rawCartIds = params.cart_ids;
+    const rawProductId = params.product_id;
+
+    if (params.from === 'cart' && rawCartIds) {
+      const parsedIds = parseCartIds(rawCartIds as string | string[]);
       if (parsedIds.length === 0) {
         Alert.alert('Error', 'Tidak ada item cart yang valid');
         return;
       }
       payload.cart_ids = parsedIds;
-    } else if (params.product_id) {
-      payload.product_id = Number(params.product_id);
-      payload.quantity = Number(params.quantity ?? 1);
+    } else if (rawProductId) {
+      const productId = Array.isArray(rawProductId) ? Number(rawProductId[0]) : Number(rawProductId);
+      const qty = params.quantity
+        ? (Array.isArray(params.quantity) ? Number(params.quantity[0]) : Number(params.quantity))
+        : 1;
+      payload.product_id = productId;
+      payload.quantity = qty;
     } else {
       Alert.alert('Error', 'Tidak ada produk yang dipilih');
       return;
@@ -179,19 +175,8 @@ export function useCheckout(params: CheckoutParams) {
     setLoading(true);
     try {
       await orderAPI.checkout(payload);
-      Alert.alert(
-        '🎉 Pesanan Berhasil!',
-        payMethod === 'COD'
-          ? 'Pesananmu sedang diproses. Siapkan uang saat kurir datang!'
-          : 'Segera lakukan transfer untuk konfirmasi pesanan.',
-        [{
-          text: 'Lihat Pesanan',
-          onPress: () => {
-            router.dismissAll();
-            router.push('/(tabs)/order' as any);
-          },
-        }]
-      );
+      // Tampilkan success modal, bukan Alert
+      setShowSuccess(true);
     } catch (e: any) {
       Alert.alert('Checkout Gagal', e.response?.data?.error ?? 'Terjadi kesalahan. Coba lagi.');
     } finally {
@@ -199,8 +184,18 @@ export function useCheckout(params: CheckoutParams) {
     }
   };
 
+  // Handler dari SuccessModal
+  const handleViewOrder = () => {
+    setShowSuccess(false);
+    router.push('/(tabs)/order' as any);
+  };
+
+  const handleContinueShopping = () => {
+    setShowSuccess(false);
+    router.push('/(tabs)' as any);
+  };
+
   return {
-    // Address
     savedAddresses,
     selectedAddressId,
     selectedAddress: savedAddresses.find(a => a.id === selectedAddressId) ?? null,
@@ -210,16 +205,14 @@ export function useCheckout(params: CheckoutParams) {
     openAddForm, openEditForm, closeForm,
     deleteAddress, saveAddress,
     setMapCoords,
-
-    // Form fields
     formLabel, setFormLabel,
     formDetail, setFormDetail,
     formLat, formLng,
-
-    // Payment
     payMethod, setPayMethod,
-
-    // Submit
     loading, submitCheckout,
+    // Export state & handler modal
+    showSuccess,
+    handleViewOrder,
+    handleContinueShopping,
   };
 }

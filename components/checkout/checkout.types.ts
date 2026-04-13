@@ -1,24 +1,20 @@
-// ─── Types ────────────────────────────────────────────────────────────────────
-
 export type PayMethod = 'COD' | 'TRANSFER';
 
 export type SavedAddress = {
   id: string;
-  label: string;       // e.g. "Rumah", "Kantor"
-  detail: string;      // Alamat lengkap
+  label: string;
+  detail: string;
   lat?: number;
   lng?: number;
 };
 
 export type CheckoutParams = {
-  from?: string;
-  cart_ids?: string;   // comma-separated, e.g. "1,2,3"
-  product_id?: string;
-  quantity?: string;
-  total?: string;      // total harga dari cart (opsional, untuk display)
+  from?: string | string[];
+  cart_ids?: string | string[];   // Fix: expo-router bisa kirim string[]
+  product_id?: string | string[];
+  quantity?: string | string[];
+  total?: string | string[];
 };
-
-// ─── Constants ────────────────────────────────────────────────────────────────
 
 export const PAY_METHODS: {
   id: PayMethod;

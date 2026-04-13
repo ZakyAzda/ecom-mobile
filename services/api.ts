@@ -72,13 +72,13 @@ export const cartAPI = {
 
 // ─── ORDERS ───────────────────────────────────────────────────────────────────
 export const orderAPI = {
-  checkout: (payload: {
-    cart_ids?: number[];
-    product_id?: number;
-    quantity?: number;
-    address: string;
-    payment_method: string;
-  }) => api.post('/api/checkout', payload),
+    checkout: (payload: {
+        cart_ids?: number[];    // sudah ada ✓
+        product_id?: number;   // sudah ada ✓
+        quantity?: number;     // sudah ada ✓
+        address: string;
+        payment_method: string;
+    }) => api.post('/api/checkout', payload),
 
   getMyOrders: () =>
     api.get('/api/orders'),

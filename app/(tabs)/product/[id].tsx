@@ -87,19 +87,23 @@ export default function ProductDetailScreen() {
   };
 
   const handleBuyNow = async () => {
-    if (!isLoggedIn) {
-      Alert.alert('Belum Login', 'Login dulu untuk membeli 🛒', [
-        { text: 'Batal', style: 'cancel' },
-        { text: 'Login', onPress: () => router.push('/(tabs)/login' as any) },
-      ]);
-      return;
-    }
-    if (!product) return;
-    router.push({
-      pathname: '/checkout',
-      params: { product_id: product.ID, quantity },
-    } as any);
-  };
+  if (!isLoggedIn) {
+    Alert.alert('Belum Login', 'Login dulu untuk membeli 🛒', [
+      { text: 'Batal', style: 'cancel' },
+      { text: 'Login', onPress: () => router.push('/(tabs)/login' as any) },
+    ]);
+    return;
+  }
+  if (!product) return;
+  router.push({
+    pathname: '/checkout',
+    params: { 
+      product_id: product.ID, 
+      quantity,
+      total: String(product.price * quantity), // tambahkan ini
+    },
+  } as any);
+};
 
   if (loading) return (
     <SafeAreaView style={[styles.centered, { backgroundColor: C.background }]}>

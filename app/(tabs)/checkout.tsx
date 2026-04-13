@@ -12,6 +12,7 @@ import { useCheckout } from '@/components/checkout/useCheckout';
 import AddressSection from '@/components/checkout/AddressSection';
 import OrderSummary from '@/components/checkout/OrderSummary';
 import PaymentSection from '@/components/checkout/PaymentSection';
+import SuccessModal from '@/components/checkout/SuccessModal';
 import { checkoutStyles as S } from '@/components/checkout/checkout.styles';
 import { CheckoutParams } from '@/components/checkout/checkout.types';
 
@@ -20,8 +21,10 @@ export default function CheckoutScreen() {
   const { C, brand, scheme } = useTheme();
   const params = useLocalSearchParams<CheckoutParams>();
 
-  // Hitung subtotal dari params (dikirim dari cart atau product detail)
-  const subtotal = params.total ? Number(params.total) : 0;
+  const rawTotal = params.total;
+  const subtotal = rawTotal
+    ? Number(Array.isArray(rawTotal) ? rawTotal[0] : rawTotal)
+    : 0;
 
   const checkout = useCheckout(params);
 
@@ -29,7 +32,7 @@ export default function CheckoutScreen() {
     <SafeAreaView style={[S.container, { backgroundColor: C.background }]}>
       <StatusBar barStyle={scheme === 'dark' ? 'light-content' : 'dark-content'} />
 
-      {/* ── Header ── */}
+      {/* Header */}
       <View style={[S.header, { backgroundColor: C.surface, borderBottomColor: C.border }]}>
         <TouchableOpacity
           style={[S.backBtn, { backgroundColor: C.surfaceAlt }]}
@@ -47,10 +50,8 @@ export default function CheckoutScreen() {
           keyboardShouldPersistTaps="handled"
           showsVerticalScrollIndicator={false}
         >
-          {/* 1. Alamat Pengiriman */}
           <AddressSection
-            C={C}
-            brand={brand}
+            C={C} brand={brand}
             savedAddresses={checkout.savedAddresses}
             selectedAddressId={checkout.selectedAddressId}
             showAddressForm={checkout.showAddressForm}
@@ -70,25 +71,21 @@ export default function CheckoutScreen() {
             onSetMapCoords={checkout.setMapCoords}
           />
 
-          {/* 2. Ringkasan Pesanan */}
           <OrderSummary
-            C={C}
-            brand={brand}
+            C={C} brand={brand}
             subtotal={subtotal}
             shippingCost={0}
           />
 
-          {/* 3. Metode Pembayaran */}
           <PaymentSection
-            C={C}
-            brand={brand}
+            C={C} brand={brand}
             selected={checkout.payMethod}
             onSelect={checkout.setPayMethod}
           />
         </ScrollView>
       </KeyboardAvoidingView>
 
-      {/* ── Bottom Bar ── */}
+      {/* Bottom Bar */}
       <View style={[S.bottomBar, { backgroundColor: C.surface, borderTopColor: C.border }]}>
         <TouchableOpacity
           style={[
@@ -110,6 +107,14 @@ export default function CheckoutScreen() {
           )}
         </TouchableOpacity>
       </View>
+
+      {/* Success Modal */}
+      <SuccessModal
+        visible={checkout.showSuccess}
+        payMethod={checkout.payMethod}
+        onViewOrder={checkout.handleViewOrder}
+        onContinueShopping={checkout.handleContinueShopping}
+      />
     </SafeAreaView>
   );
 }

@@ -27,8 +27,7 @@ export default function CartScreen() {
   const [items, setItems] = useState<CartItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [isLoggedIn, setIsLoggedIn] = useState(false);
-  const [selectedItems, setSelectedItems] = useState<Set<number>>(new Set());
-  // Track local quantity changes (cartID -> qty)
+  const [selectedProductIds, setSelectedProductIds] = useState<Set<number>>(new Set());
   const [localQty, setLocalQty] = useState<Record<number, number>>({});
   const [updatingQty, setUpdatingQty] = useState<Set<number>>(new Set());
 
@@ -40,7 +39,6 @@ export default function CartScreen() {
       const res = await cartAPI.getMyCart();
       const cartItems: CartItem[] = res.data?.data ?? [];
       setItems(cartItems);
-      // Init local qty dari server
       const initQty: Record<number, number> = {};
       cartItems.forEach(i => { initQty[i.ID] = i.quantity; });
       setLocalQty(initQty);
@@ -48,32 +46,30 @@ export default function CartScreen() {
     setLoading(false);
   }, []);
 
-  // ✅ FIX: Refresh cart setiap kali screen difokus (bukan hanya saat mount)
   useFocusEffect(
     useCallback(() => {
       fetchCart();
     }, [fetchCart])
   );
 
-  const toggleSelect = (id: number) => {
-    setSelectedItems(prev => {
+  // Gunakan product ID bukan cart ID untuk tracking selection
+  const toggleSelect = (productId: number) => {
+    setSelectedProductIds(prev => {
       const newSet = new Set(prev);
-      if (newSet.has(id)) newSet.delete(id);
-      else newSet.add(id);
+      if (newSet.has(productId)) newSet.delete(productId);
+      else newSet.add(productId);
       return newSet;
     });
   };
 
   const toggleSelectAll = () => {
-    if (selectedItems.size === items.length) {
-      setSelectedItems(new Set());
+    if (selectedProductIds.size === items.length) {
+      setSelectedProductIds(new Set());
     } else {
-      setSelectedItems(new Set(items.map(i => i.ID)));
+      setSelectedProductIds(new Set(items.map(i => i.product.ID)));
     }
   };
 
-  // Hapus item dari cart lalu tambah ulang dengan qty baru
-  // (Workaround karena backend tidak punya endpoint update qty)
   const handleChangeQty = async (item: CartItem, delta: number) => {
     const currentQty = localQty[item.ID] ?? item.quantity;
     const newQty = currentQty + delta;
@@ -84,38 +80,24 @@ export default function CartScreen() {
       return;
     }
 
-    // Optimistic update UI
     setLocalQty(prev => ({ ...prev, [item.ID]: newQty }));
     setUpdatingQty(prev => new Set(prev).add(item.ID));
 
     try {
-      // Hapus cart lama, buat baru dengan qty baru
       await cartAPI.removeFromCart(item.ID);
-      const addRes = await cartAPI.addToCart(item.product.ID, newQty);
+      await cartAPI.addToCart(item.product.ID, newQty);
 
-      // Refresh cart untuk dapat ID baru dari server
+      // Fetch ulang cart untuk dapat ID terbaru
       const res = await cartAPI.getMyCart();
       const newItems: CartItem[] = res.data?.data ?? [];
       setItems(newItems);
 
-      // Rebuild localQty & selectedItems dengan ID baru
       const updatedQty: Record<number, number> = {};
       newItems.forEach(i => { updatedQty[i.ID] = i.quantity; });
       setLocalQty(updatedQty);
 
-      // Cari item yang baru (product ID sama)
-      const newItem = newItems.find(i => i.product.ID === item.product.ID);
-      if (newItem) {
-        setSelectedItems(prev => {
-          const wasSelected = prev.has(item.ID);
-          const next = new Set(prev);
-          next.delete(item.ID);
-          if (wasSelected) next.add(newItem.ID);
-          return next;
-        });
-      }
+      // selectedProductIds tidak perlu diubah karena pakai product ID
     } catch (e: any) {
-      // Rollback jika gagal
       setLocalQty(prev => ({ ...prev, [item.ID]: currentQty }));
       Alert.alert('Gagal', 'Gagal mengubah jumlah item');
     } finally {
@@ -132,9 +114,10 @@ export default function CartScreen() {
       await cartAPI.removeFromCart(cartId);
       setItems(prev => prev.filter(item => item.ID !== cartId));
       setLocalQty(prev => { const next = { ...prev }; delete next[cartId]; return next; });
-      setSelectedItems(prev => {
+      // Hapus dari selection pakai product ID
+      setSelectedProductIds(prev => {
         const newSet = new Set(prev);
-        newSet.delete(cartId);
+        newSet.delete(productId);
         return newSet;
       });
     } catch (err) {
@@ -143,17 +126,30 @@ export default function CartScreen() {
   };
 
   const totalPrice = items
-    .filter(i => selectedItems.has(i.ID))
+    .filter(i => selectedProductIds.has(i.product.ID))
     .reduce((sum, i) => sum + i.product.price * (localQty[i.ID] ?? i.quantity), 0);
 
   const handleCheckout = () => {
-    if (selectedItems.size === 0) {
+    if (selectedProductIds.size === 0) {
       Alert.alert('Pilih Produk', 'Pilih minimal satu produk untuk di-checkout!');
       return;
     }
-    // ✅ FIX: Kirim cart_ids yang benar + total harga
-    const cartIds = Array.from(selectedItems).join(',');
-    router.push({ pathname: '/checkout', params: { from: 'cart', cart_ids: cartIds, total: String(totalPrice) } } as any);
+
+    // Ambil cart ID terbaru berdasarkan product ID yang dipilih
+    const selectedCartIds = items
+      .filter(i => selectedProductIds.has(i.product.ID))
+      .map(i => i.ID);
+
+    if (selectedCartIds.length === 0) {
+      Alert.alert('Error', 'Gagal mendapatkan item cart, coba refresh halaman');
+      return;
+    }
+
+    const cartIds = selectedCartIds.join(',');
+    router.push({ 
+      pathname: '/checkout', 
+      params: { from: 'cart', cart_ids: cartIds, total: String(totalPrice) } 
+    } as any);
   };
 
   if (loading) return (
@@ -176,14 +172,13 @@ export default function CartScreen() {
     </SafeAreaView>
   );
 
-  const isAllSelected = items.length > 0 && selectedItems.size === items.length;
+  const isAllSelected = items.length > 0 && selectedProductIds.size === items.length;
 
   return (
     <GestureHandlerRootView style={{ flex: 1 }}>
       <SafeAreaView style={[styles.container, { backgroundColor: C.background }]} edges={['top', 'left', 'right']}>
         <StatusBar barStyle={scheme === 'dark' ? 'light-content' : 'dark-content'} backgroundColor={C.background} />
 
-        {/* Header */}
         <View style={[styles.header, { backgroundColor: C.surface, borderBottomColor: C.border }]}>
           <TouchableOpacity
             style={[styles.backBtn, { backgroundColor: C.surfaceAlt }]}
@@ -195,7 +190,6 @@ export default function CartScreen() {
           <Text style={[styles.headerCount, { color: C.textSecondary }]}>{items.length} item</Text>
         </View>
 
-        {/* Select All Row */}
         {items.length > 0 && (
           <View style={[styles.selectAllRow, { backgroundColor: C.surface, borderBottomColor: C.border }]}>
             <TouchableOpacity style={styles.checkboxContainer} onPress={toggleSelectAll}>
@@ -217,7 +211,7 @@ export default function CartScreen() {
             if (!uri.startsWith('http') && uri !== '') {
               uri = `${BASE_URL}${uri.startsWith('/') ? '' : '/'}${uri}`;
             }
-            const isSelected = selectedItems.has(item.ID);
+            const isSelected = selectedProductIds.has(item.product.ID);
             const qty = localQty[item.ID] ?? item.quantity;
             const isUpdating = updatingQty.has(item.ID);
 
@@ -234,14 +228,12 @@ export default function CartScreen() {
                 )}
               >
                 <View style={[styles.itemCardWrapper, { backgroundColor: C.surface, shadowColor: C.shadow }]}>
-                  {/* Checkbox */}
-                  <TouchableOpacity style={styles.checkboxContainer} onPress={() => toggleSelect(item.ID)}>
+                  <TouchableOpacity style={styles.checkboxContainer} onPress={() => toggleSelect(item.product.ID)}>
                     <View style={[styles.checkbox, isSelected && { backgroundColor: brand.primary, borderColor: brand.primary }]}>
                       {isSelected && <MaterialIcons name="check" size={16} color="#fff" />}
                     </View>
                   </TouchableOpacity>
 
-                  {/* Gambar */}
                   <Image
                     source={{ uri }}
                     style={[styles.itemImage, { backgroundColor: C.surfaceAlt }]}
@@ -249,7 +241,6 @@ export default function CartScreen() {
                     transition={400}
                   />
 
-                  {/* Info */}
                   <View style={styles.itemInfo}>
                     <Text style={[styles.itemName, { color: C.text }]} numberOfLines={2}>
                       {item.product.name}
@@ -258,7 +249,6 @@ export default function CartScreen() {
                       {formatRupiah(item.product.price)}
                     </Text>
 
-                    {/* ✅ Tombol tambah/kurang qty */}
                     <View style={styles.qtyRow}>
                       <TouchableOpacity
                         style={[
@@ -297,7 +287,6 @@ export default function CartScreen() {
                       </Text>
                     </View>
 
-                    {/* Subtotal per item */}
                     <Text style={[styles.subtotal, { color: C.textSecondary }]}>
                       Subtotal: {formatRupiah(item.product.price * qty)}
                     </Text>
@@ -319,7 +308,6 @@ export default function CartScreen() {
           }
         />
 
-        {/* Bottom bar */}
         {items.length > 0 && (
           <View style={[styles.checkoutBar, { backgroundColor: C.surface, borderTopColor: C.border }]}>
             <View style={styles.totalContainer}>
@@ -329,15 +317,15 @@ export default function CartScreen() {
             <TouchableOpacity
               style={[
                 styles.checkoutBtn,
-                { backgroundColor: selectedItems.size > 0 ? brand.primary : C.surfaceAlt, shadowColor: brand.primary },
+                { backgroundColor: selectedProductIds.size > 0 ? brand.primary : C.surfaceAlt, shadowColor: brand.primary },
               ]}
               onPress={handleCheckout}
-              disabled={selectedItems.size === 0}
+              disabled={selectedProductIds.size === 0}
             >
-              <Text style={[styles.checkoutBtnText, { color: selectedItems.size > 0 ? '#fff' : C.textMuted }]}>
-                Checkout ({selectedItems.size})
+              <Text style={[styles.checkoutBtnText, { color: selectedProductIds.size > 0 ? '#fff' : C.textMuted }]}>
+                Checkout ({selectedProductIds.size})
               </Text>
-              <MaterialIcons name="arrow-forward" size={18} color={selectedItems.size > 0 ? '#fff' : C.textMuted} />
+              <MaterialIcons name="arrow-forward" size={18} color={selectedProductIds.size > 0 ? '#fff' : C.textMuted} />
             </TouchableOpacity>
           </View>
         )}
@@ -385,8 +373,6 @@ const styles = StyleSheet.create({
   itemInfo: { flex: 1, gap: 4 },
   itemName: { fontSize: 13, fontWeight: '600', lineHeight: 18 },
   itemPrice: { fontSize: 13, fontWeight: '700' },
-
-  // Qty controls
   qtyRow: { flexDirection: 'row', alignItems: 'center', gap: 6, marginTop: 4 },
   qtyBtn: {
     width: 28, height: 28, borderRadius: 8, borderWidth: 1.5,
@@ -399,9 +385,7 @@ const styles = StyleSheet.create({
   },
   qtyValue: { fontSize: 13, fontWeight: '800', textAlign: 'center' },
   stockHint: { fontSize: 10, marginLeft: 2 },
-
   subtotal: { fontSize: 11, fontWeight: '600', marginTop: 2 },
-
   emptyWrapper: { alignItems: 'center', paddingTop: 80, gap: 10 },
   emptyTitle: { fontSize: 18, fontWeight: '800' },
   emptySubtitle: { fontSize: 14 },

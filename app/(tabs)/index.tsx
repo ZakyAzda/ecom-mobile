@@ -94,10 +94,18 @@ export default function HomeScreen() {
   };
 
   const handleBuyNow = async (product: Product) => {
-    const token = await AsyncStorage.getItem('token');
-    if (!token) { router.push('/profile'); return; }
-    router.push({ pathname: '/checkout', params: { productId: product.ID, qty: 1 } } as any);
-  };
+  const token = await AsyncStorage.getItem('token');
+  if (!token) { router.push('/profile'); return; }
+  router.push({ 
+    pathname: '/checkout', 
+    params: { 
+      product_id: product.ID, 
+      qty: 1,
+      quantity: 1,          // tambahkan ini
+      total: String(product.price), // tambahkan ini
+    } 
+  } as any);
+};
 
   const formatRupiah = (num: number) => 'Rp ' + num.toLocaleString('id-ID');
   const getImageUrl = (url: string) => {
