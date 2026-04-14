@@ -1,4 +1,4 @@
-import { useState, useCallback } from 'react';
+import { useState, useCallback, useRef } from 'react';
 import { Alert } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useRouter } from 'expo-router';
@@ -23,7 +23,7 @@ function generateId(): string {
 
 export function useCheckout(params: CheckoutParams) {
   const router = useRouter();
-
+  const isPaymentProcessed = useRef(false);
   const [savedAddresses, setSavedAddresses] = useState<SavedAddress[]>([]);
   const [selectedAddressId, setSelectedAddressId] = useState<string | null>(null);
   const [showAddressForm, setShowAddressForm] = useState(false);
@@ -200,9 +200,13 @@ export function useCheckout(params: CheckoutParams) {
 }) => {
   setShowMidtrans(false);
 
+  if (result.status === 'close' && isPaymentProcessed.current) {
+      return;
+    }
+
   switch (result.status) {
     case 'success':
-      // ✅ Update status order ke PENGIRIMAN langsung dari client
+      isPaymentProcessed.current = true;
       if (createdOrderId) {
         import('@/services/api').then(m => {
           m.default.post('/api/payment/update-status', {
@@ -215,22 +219,28 @@ export function useCheckout(params: CheckoutParams) {
       break;
 
     case 'pending':
+      isPaymentProcessed.current = true;
       setPendingModalType('pending');
       setPendingErrorMessage('');
       setShowPendingModal(true);
       break;
 
     case 'error':
+      isPaymentProcessed.current = true;
       setPendingModalType('error');
       setPendingErrorMessage(result.result?.status_message ?? '');
       setShowPendingModal(true);
       break;
 
     case 'close':
+      if (isPaymentProcessed && isPaymentProcessed.current) {
+           return;
+        }
       setPendingModalType('close');
       setPendingErrorMessage('');
       setShowPendingModal(true);
-      break;
+      router.push('/(tabs)/order' as any);
+        break;
   }
 };
 
