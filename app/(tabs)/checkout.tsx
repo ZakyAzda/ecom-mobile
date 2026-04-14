@@ -13,6 +13,7 @@ import AddressSection from '@/components/checkout/AddressSection';
 import OrderSummary from '@/components/checkout/OrderSummary';
 import PaymentSection from '@/components/checkout/PaymentSection';
 import SuccessModal from '@/components/checkout/SuccessModal';
+import MidtransWebView from '@/components/payment/MidtransWebView'; // ✅ Import
 import { checkoutStyles as S } from '@/components/checkout/checkout.styles';
 import { CheckoutParams } from '@/components/checkout/checkout.types';
 
@@ -102,13 +103,26 @@ export default function CheckoutScreen() {
           ) : (
             <>
               <MaterialIcons name="check-circle" size={20} color="#fff" />
-              <Text style={S.submitBtnText}>Buat Pesanan</Text>
+              <Text style={S.submitBtnText}>
+                {checkout.payMethod === 'COD' ? 'Buat Pesanan' : 'Lanjut ke Pembayaran'}
+              </Text>
             </>
           )}
         </TouchableOpacity>
       </View>
 
-      {/* Success Modal */}
+      {/* ✅ Midtrans WebView Popup — muncul setelah order dibuat */}
+      {checkout.snapToken !== '' && (
+        <MidtransWebView
+          visible={checkout.showMidtrans}
+          snapToken={checkout.snapToken}
+          onResult={checkout.handleMidtransResult}
+          brand={brand}
+          C={C}
+        />
+      )}
+
+      {/* Success Modal (khusus COD) */}
       <SuccessModal
         visible={checkout.showSuccess}
         payMethod={checkout.payMethod}

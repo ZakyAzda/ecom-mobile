@@ -10,7 +10,7 @@ export type SavedAddress = {
 
 export type CheckoutParams = {
   from?: string | string[];
-  cart_ids?: string | string[];   // Fix: expo-router bisa kirim string[]
+  cart_ids?: string | string[];
   product_id?: string | string[];
   quantity?: string | string[];
   total?: string | string[];
@@ -22,8 +22,18 @@ export const PAY_METHODS: {
   icon: string;
   desc: string;
 }[] = [
-  { id: 'COD',      label: 'Bayar di Tempat', icon: '💵', desc: 'Bayar saat barang tiba' },
-  { id: 'TRANSFER', label: 'Transfer Bank',    icon: '🏦', desc: 'Via BCA / Mandiri / BRI' },
+  {
+    id: 'TRANSFER',
+    label: 'Bayar Online (Midtrans)',
+    icon: '💳',
+    desc: 'Kartu kredit, QRIS, GoPay, OVO, Transfer Bank',
+  },
+  {
+    id: 'COD',
+    label: 'Bayar di Tempat (COD)',
+    icon: '💵',
+    desc: 'Bayar tunai saat barang tiba',
+  },
 ];
 
 export const STORAGE_KEY_ADDRESSES = 'saved_addresses';

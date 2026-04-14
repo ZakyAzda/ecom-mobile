@@ -33,11 +33,16 @@ export function useCheckout(params: CheckoutParams) {
   const [formLat, setFormLat] = useState<number | undefined>();
   const [formLng, setFormLng] = useState<number | undefined>();
 
-  const [payMethod, setPayMethod] = useState<PayMethod>('COD');
+  const [payMethod, setPayMethod] = useState<PayMethod>('TRANSFER'); // Default ke TRANSFER
   const [loading, setLoading] = useState(false);
 
-  // State untuk success modal
+  // State success modal (COD) dan Midtrans
   const [showSuccess, setShowSuccess] = useState(false);
+  const [createdOrderId, setCreatedOrderId] = useState<number | null>(null);
+
+  // ✅ State untuk Midtrans WebView popup
+  const [showMidtrans, setShowMidtrans] = useState(false);
+  const [snapToken, setSnapToken] = useState('');
 
   const loadAddresses = useCallback(async () => {
     try {
@@ -60,39 +65,27 @@ export function useCheckout(params: CheckoutParams) {
 
   const openAddForm = () => {
     setEditingAddress(null);
-    setFormLabel('');
-    setFormDetail('');
-    setFormLat(undefined);
-    setFormLng(undefined);
+    setFormLabel(''); setFormDetail('');
+    setFormLat(undefined); setFormLng(undefined);
     setShowAddressForm(true);
   };
 
   const openEditForm = (address: SavedAddress) => {
     setEditingAddress(address);
-    setFormLabel(address.label);
-    setFormDetail(address.detail);
-    setFormLat(address.lat);
-    setFormLng(address.lng);
+    setFormLabel(address.label); setFormDetail(address.detail);
+    setFormLat(address.lat); setFormLng(address.lng);
     setShowAddressForm(true);
   };
 
-  const closeForm = () => {
-    setShowAddressForm(false);
-    setEditingAddress(null);
-  };
+  const closeForm = () => { setShowAddressForm(false); setEditingAddress(null); };
 
   const saveAddress = async () => {
-    if (!formLabel.trim()) {
-      Alert.alert('Label Kosong', 'Isi label alamat dulu, contoh: Rumah, Kantor');
-      return;
-    }
+    if (!formLabel.trim()) { Alert.alert('Label Kosong', 'Isi label alamat dulu'); return; }
     if (!formDetail.trim() || formDetail.trim().length < 10) {
-      Alert.alert('Alamat Kurang Detail', 'Isi alamat lengkap minimal 10 karakter');
-      return;
+      Alert.alert('Alamat Kurang Detail', 'Minimal 10 karakter'); return;
     }
 
     let updatedList: SavedAddress[];
-
     if (editingAddress) {
       updatedList = savedAddresses.map(a =>
         a.id === editingAddress.id
@@ -101,11 +94,8 @@ export function useCheckout(params: CheckoutParams) {
       );
     } else {
       const newAddress: SavedAddress = {
-        id: generateId(),
-        label: formLabel.trim(),
-        detail: formDetail.trim(),
-        lat: formLat,
-        lng: formLng,
+        id: generateId(), label: formLabel.trim(), detail: formDetail.trim(),
+        lat: formLat, lng: formLng,
       };
       updatedList = [...savedAddresses, newAddress];
       setSelectedAddressId(newAddress.id);
@@ -134,10 +124,10 @@ export function useCheckout(params: CheckoutParams) {
   };
 
   const setMapCoords = (lat: number, lng: number, _address: string) => {
-    setFormLat(lat);
-    setFormLng(lng);
+    setFormLat(lat); setFormLng(lng);
   };
 
+  // ✅ Submit checkout — jika TRANSFER, buka Midtrans setelah order dibuat
   const submitCheckout = async () => {
     const selectedAddress = savedAddresses.find(a => a.id === selectedAddressId);
     if (!selectedAddress) {
@@ -147,7 +137,8 @@ export function useCheckout(params: CheckoutParams) {
 
     const payload: any = {
       address: selectedAddress.detail,
-      payment_method: payMethod,
+      // Midtrans akan handle semua metode bayar — selalu kirim BELUM_BAYAR untuk TRANSFER
+      payment_method: payMethod === 'COD' ? 'COD' : 'TRANSFER',
     };
 
     const rawCartIds = params.cart_ids;
@@ -155,10 +146,7 @@ export function useCheckout(params: CheckoutParams) {
 
     if (params.from === 'cart' && rawCartIds) {
       const parsedIds = parseCartIds(rawCartIds as string | string[]);
-      if (parsedIds.length === 0) {
-        Alert.alert('Error', 'Tidak ada item cart yang valid');
-        return;
-      }
+      if (parsedIds.length === 0) { Alert.alert('Error', 'Tidak ada item cart yang valid'); return; }
       payload.cart_ids = parsedIds;
     } else if (rawProductId) {
       const productId = Array.isArray(rawProductId) ? Number(rawProductId[0]) : Number(rawProductId);
@@ -174,19 +162,85 @@ export function useCheckout(params: CheckoutParams) {
 
     setLoading(true);
     try {
-      await orderAPI.checkout(payload);
-      // Tampilkan success modal, bukan Alert
-      setShowSuccess(true);
+      const res = await orderAPI.checkout(payload);
+      const order = res.data?.order;
+      const orderId: number = order?.ID ?? order?.id;
+
+      setCreatedOrderId(orderId);
+
+      if (payMethod === 'COD') {
+        // COD → langsung tampil success modal (tanpa Midtrans)
+        setShowSuccess(true);
+      } else {
+        // TRANSFER → minta snap_token dan tampilkan Midtrans WebView
+        if (!orderId) throw new Error('Order ID tidak ditemukan');
+
+        const snapRes = await import('@/services/api').then(m => m.default.post('/api/payment/snap-token', {
+          order_id: orderId,
+        }));
+        const token: string = snapRes.data.snap_token;
+        if (!token) throw new Error('Snap token kosong');
+
+        setSnapToken(token);
+        setShowMidtrans(true);
+      }
     } catch (e: any) {
-      Alert.alert('Checkout Gagal', e.response?.data?.error ?? 'Terjadi kesalahan. Coba lagi.');
+      Alert.alert('Checkout Gagal', e.response?.data?.error ?? e.message ?? 'Terjadi kesalahan.');
     } finally {
       setLoading(false);
     }
   };
 
-  // Handler dari SuccessModal
+  // ✅ Handle hasil Midtrans WebView
+  const handleMidtransResult = (result: {
+    status: 'success' | 'pending' | 'error' | 'close';
+    result?: any;
+  }) => {
+    setShowMidtrans(false);
+
+    switch (result.status) {
+      case 'success':
+        setShowSuccess(true); // Tampilkan success modal
+        break;
+      case 'pending':
+        Alert.alert(
+          '⏳ Selesaikan Pembayaran',
+          'Pesananmu sudah dibuat. Selesaikan pembayaran sebelum kadaluarsa.',
+          [{ text: 'Lihat Pesanan', onPress: handleViewOrder }]
+        );
+        break;
+      case 'error':
+        Alert.alert(
+          '❌ Pembayaran Gagal',
+          result.result?.status_message ?? 'Coba lagi atau pilih metode lain.',
+          [
+            { text: 'Batal', style: 'cancel', onPress: handleViewOrder },
+            {
+              text: 'Bayar Lagi',
+              onPress: () => {
+                if (snapToken) { setShowMidtrans(true); } // Buka ulang dengan token sama
+              },
+            },
+          ]
+        );
+        break;
+      case 'close':
+        // User tutup — tanya mau lanjut bayar atau tidak
+        Alert.alert(
+          'Pembayaran Belum Selesai',
+          'Pesananmu sudah dibuat tapi belum dibayar. Bayar sekarang?',
+          [
+            { text: 'Nanti', style: 'cancel', onPress: handleViewOrder },
+            { text: 'Bayar Sekarang', onPress: () => setShowMidtrans(true) },
+          ]
+        );
+        break;
+    }
+  };
+
   const handleViewOrder = () => {
     setShowSuccess(false);
+    setShowMidtrans(false);
     router.push('/(tabs)/order' as any);
   };
 
@@ -210,8 +264,13 @@ export function useCheckout(params: CheckoutParams) {
     formLat, formLng,
     payMethod, setPayMethod,
     loading, submitCheckout,
-    // Export state & handler modal
+    // COD success modal
     showSuccess,
+    // ✅ Midtrans
+    showMidtrans,
+    snapToken,
+    handleMidtransResult,
+    // Navigasi
     handleViewOrder,
     handleContinueShopping,
   };
