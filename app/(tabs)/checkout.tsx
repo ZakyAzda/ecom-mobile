@@ -13,7 +13,8 @@ import AddressSection from '@/components/checkout/AddressSection';
 import OrderSummary from '@/components/checkout/OrderSummary';
 import PaymentSection from '@/components/checkout/PaymentSection';
 import SuccessModal from '@/components/checkout/SuccessModal';
-import MidtransWebView from '@/components/payment/MidtransWebView'; // ✅ Import
+import MidtransWebView from '@/components/payment/MidtransWebView';
+import PendingPaymentModal from '@/components/payment/PendingPaymentModal';
 import { checkoutStyles as S } from '@/components/checkout/checkout.styles';
 import { CheckoutParams } from '@/components/checkout/checkout.types';
 
@@ -111,7 +112,7 @@ export default function CheckoutScreen() {
         </TouchableOpacity>
       </View>
 
-      {/* ✅ Midtrans WebView Popup — muncul setelah order dibuat */}
+      {/* Midtrans WebView Popup */}
       {checkout.snapToken !== '' && (
         <MidtransWebView
           visible={checkout.showMidtrans}
@@ -122,7 +123,17 @@ export default function CheckoutScreen() {
         />
       )}
 
-      {/* Success Modal (khusus COD) */}
+      {/* ✅ Pending / Close / Error Modal */}
+      <PendingPaymentModal
+        visible={checkout.showPendingModal}
+        type={checkout.pendingModalType}
+        errorMessage={checkout.pendingErrorMessage}
+        onPayAgain={checkout.handlePayAgain}
+        onViewOrder={checkout.handleViewOrder}
+        onContinueShopping={checkout.handleContinueShopping}
+      />
+
+      {/* Success Modal (COD & Transfer sukses) */}
       <SuccessModal
         visible={checkout.showSuccess}
         payMethod={checkout.payMethod}

@@ -7,6 +7,7 @@ import { useFocusEffect } from '@react-navigation/native';
 import {
   PayMethod, SavedAddress, CheckoutParams, STORAGE_KEY_ADDRESSES,
 } from './checkout.types';
+import { PendingModalType } from '../payment/PendingPaymentModal';
 
 function parseCartIds(raw: string | string[]): number[] {
   const str = Array.isArray(raw) ? raw.join(',') : raw;
@@ -33,16 +34,21 @@ export function useCheckout(params: CheckoutParams) {
   const [formLat, setFormLat] = useState<number | undefined>();
   const [formLng, setFormLng] = useState<number | undefined>();
 
-  const [payMethod, setPayMethod] = useState<PayMethod>('TRANSFER'); // Default ke TRANSFER
+  const [payMethod, setPayMethod] = useState<PayMethod>('TRANSFER');
   const [loading, setLoading] = useState(false);
 
-  // State success modal (COD) dan Midtrans
+  // Modal states
   const [showSuccess, setShowSuccess] = useState(false);
   const [createdOrderId, setCreatedOrderId] = useState<number | null>(null);
 
-  // ✅ State untuk Midtrans WebView popup
+  // ✅ Midtrans WebView
   const [showMidtrans, setShowMidtrans] = useState(false);
   const [snapToken, setSnapToken] = useState('');
+
+  // ✅ Pending/Close/Error modal (pengganti Alert)
+  const [showPendingModal, setShowPendingModal] = useState(false);
+  const [pendingModalType, setPendingModalType] = useState<PendingModalType>('close');
+  const [pendingErrorMessage, setPendingErrorMessage] = useState('');
 
   const loadAddresses = useCallback(async () => {
     try {
@@ -127,7 +133,6 @@ export function useCheckout(params: CheckoutParams) {
     setFormLat(lat); setFormLng(lng);
   };
 
-  // ✅ Submit checkout — jika TRANSFER, buka Midtrans setelah order dibuat
   const submitCheckout = async () => {
     const selectedAddress = savedAddresses.find(a => a.id === selectedAddressId);
     if (!selectedAddress) {
@@ -137,7 +142,6 @@ export function useCheckout(params: CheckoutParams) {
 
     const payload: any = {
       address: selectedAddress.detail,
-      // Midtrans akan handle semua metode bayar — selalu kirim BELUM_BAYAR untuk TRANSFER
       payment_method: payMethod === 'COD' ? 'COD' : 'TRANSFER',
     };
 
@@ -169,10 +173,8 @@ export function useCheckout(params: CheckoutParams) {
       setCreatedOrderId(orderId);
 
       if (payMethod === 'COD') {
-        // COD → langsung tampil success modal (tanpa Midtrans)
         setShowSuccess(true);
       } else {
-        // TRANSFER → minta snap_token dan tampilkan Midtrans WebView
         if (!orderId) throw new Error('Order ID tidak ditemukan');
 
         const snapRes = await import('@/services/api').then(m => m.default.post('/api/payment/snap-token', {
@@ -191,63 +193,70 @@ export function useCheckout(params: CheckoutParams) {
     }
   };
 
-  // ✅ Handle hasil Midtrans WebView
+  // ✅ Handle hasil Midtrans — pakai modal, bukan Alert
   const handleMidtransResult = (result: {
-    status: 'success' | 'pending' | 'error' | 'close';
-    result?: any;
-  }) => {
-    setShowMidtrans(false);
+  status: 'success' | 'pending' | 'error' | 'close';
+  result?: any;
+}) => {
+  setShowMidtrans(false);
 
-    switch (result.status) {
-      case 'success':
-        setShowSuccess(true); // Tampilkan success modal
-        break;
-      case 'pending':
-        Alert.alert(
-          '⏳ Selesaikan Pembayaran',
-          'Pesananmu sudah dibuat. Selesaikan pembayaran sebelum kadaluarsa.',
-          [{ text: 'Lihat Pesanan', onPress: handleViewOrder }]
-        );
-        break;
-      case 'error':
-        Alert.alert(
-          '❌ Pembayaran Gagal',
-          result.result?.status_message ?? 'Coba lagi atau pilih metode lain.',
-          [
-            { text: 'Batal', style: 'cancel', onPress: handleViewOrder },
-            {
-              text: 'Bayar Lagi',
-              onPress: () => {
-                if (snapToken) { setShowMidtrans(true); } // Buka ulang dengan token sama
-              },
-            },
-          ]
-        );
-        break;
-      case 'close':
-        // User tutup — tanya mau lanjut bayar atau tidak
-        Alert.alert(
-          'Pembayaran Belum Selesai',
-          'Pesananmu sudah dibuat tapi belum dibayar. Bayar sekarang?',
-          [
-            { text: 'Nanti', style: 'cancel', onPress: handleViewOrder },
-            { text: 'Bayar Sekarang', onPress: () => setShowMidtrans(true) },
-          ]
-        );
-        break;
+  switch (result.status) {
+    case 'success':
+      // ✅ Update status order ke PENGIRIMAN langsung dari client
+      if (createdOrderId) {
+        import('@/services/api').then(m => {
+          m.default.post('/api/payment/update-status', {
+            order_id: createdOrderId,
+            status: 'PENGIRIMAN',
+          }).catch(e => console.warn('Gagal update status:', e));
+        });
+      }
+      setShowSuccess(true);
+      break;
+
+    case 'pending':
+      setPendingModalType('pending');
+      setPendingErrorMessage('');
+      setShowPendingModal(true);
+      break;
+
+    case 'error':
+      setPendingModalType('error');
+      setPendingErrorMessage(result.result?.status_message ?? '');
+      setShowPendingModal(true);
+      break;
+
+    case 'close':
+      setPendingModalType('close');
+      setPendingErrorMessage('');
+      setShowPendingModal(true);
+      break;
+  }
+};
+
+  // ✅ Handler dari PendingPaymentModal
+  const handlePayAgain = () => {
+    setShowPendingModal(false);
+    // Buka ulang Midtrans dengan token yang sama
+    if (snapToken) {
+      setShowMidtrans(true);
     }
   };
 
   const handleViewOrder = () => {
     setShowSuccess(false);
+    setShowPendingModal(false);
     setShowMidtrans(false);
     router.push('/(tabs)/order' as any);
   };
 
   const handleContinueShopping = () => {
     setShowSuccess(false);
+    setShowPendingModal(false);
     router.push('/(tabs)' as any);
   };
+
+  
 
   return {
     savedAddresses,
@@ -266,10 +275,15 @@ export function useCheckout(params: CheckoutParams) {
     loading, submitCheckout,
     // COD success modal
     showSuccess,
-    // ✅ Midtrans
+    // Midtrans
     showMidtrans,
     snapToken,
     handleMidtransResult,
+    // ✅ Pending/Error/Close modal
+    showPendingModal,
+    pendingModalType,
+    pendingErrorMessage,
+    handlePayAgain,
     // Navigasi
     handleViewOrder,
     handleContinueShopping,
