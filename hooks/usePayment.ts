@@ -9,7 +9,8 @@ type PaymentResult = {
   result?: any;
 };
 
-export function usePayment() {
+// TAMBAHAN: Kita tambahkan parameter onSuccessCallback di sini
+export function usePayment(onSuccessCallback?: () => void) {
   const [paymentStatus, setPaymentStatus] = useState<PaymentStatus>('idle');
   const [snapToken, setSnapToken] = useState<string>('');
   const [showPayment, setShowPayment] = useState(false);
@@ -41,28 +42,70 @@ export function usePayment() {
   }, []);
 
   // Dipanggil oleh MidtransWebView saat ada hasil pembayaran
-  const handlePaymentResult = useCallback((result: PaymentResult) => {
+  const handlePaymentResult = useCallback(async (result: PaymentResult) => {
     setShowPayment(false);
 
     switch (result.status) {
       case 'success':
         setPaymentStatus('success');
+        
+        if (lastOrderId) {
+          try {
+            await api.post('/api/payment/update-status', {
+              order_id: lastOrderId,
+              status: 'PENGIRIMAN'
+            });
+          } catch (error) {
+            console.error("Gagal update status di backend:", error);
+          }
+        }
+
         Alert.alert(
           '✅ Pembayaran Berhasil!',
           'Pesananmu sudah dikonfirmasi dan akan segera diproses.',
-          [{ text: 'Lihat Pesanan', style: 'default' }]
+          [
+            { 
+              text: 'Lihat Pesanan', 
+              style: 'default',
+              // TAMBAHAN: Panggil callback di sini agar UI me-refresh daftar pesanan
+              onPress: () => {
+                if (onSuccessCallback) onSuccessCallback();
+              }
+            }
+          ]
         );
         break;
 
       case 'pending':
         setPaymentStatus('pending');
+        
+        if (lastOrderId) {
+          try {
+             await api.post('/api/payment/update-status', {
+              order_id: lastOrderId,
+              status: 'BELUM_BAYAR'
+            });
+          } catch (error) {
+             console.error("Gagal update status di backend:", error);
+          }
+        }
+
         Alert.alert(
           '⏳ Menunggu Pembayaran',
           'Selesaikan pembayaranmu sebelum batas waktu. Status pesanan akan diperbarui otomatis.',
-          [{ text: 'OK' }]
+          [
+            { 
+              text: 'OK',
+              // TAMBAHAN: Refresh UI juga saat pending jika dibutuhkan
+              onPress: () => {
+                if (onSuccessCallback) onSuccessCallback();
+              }
+            }
+          ]
         );
         break;
 
+      // Hapus case 'error' yang double, sisakan satu saja
       case 'error':
         setPaymentStatus('error');
         Alert.alert(
@@ -80,7 +123,7 @@ export function usePayment() {
         setPaymentStatus('idle');
         break;
     }
-  }, [lastOrderId, initiatePayment]);
+  }, [lastOrderId, initiatePayment, onSuccessCallback]); // Tambahkan onSuccessCallback ke dependency array
 
   const closePayment = useCallback(() => {
     setShowPayment(false);

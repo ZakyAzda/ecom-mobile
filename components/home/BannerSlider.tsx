@@ -3,9 +3,9 @@ import { View, Text, Image, FlatList } from 'react-native';
 import { styles, BANNER_WIDTH } from './home.styles';
 
 const BANNERS = [
-  { id: 'banner-1', image: require('@/assets/uploads/about5.jpg'), tag: 'PROMO', tagColor: '#FF7043', title: '20% off on your\nfirst purchase', sub: 'Sayuran hidroponik segar dari kebun' },
-  { id: 'banner-2', image: require('@/assets/uploads/about2.jpg'), tag: 'NEW ARRIVAL', tagColor: '#1565C0', title: 'Produk segar\ntiba setiap hari', sub: 'Langsung dari petani lokal' },
-  { id: 'banner-3', image: require('@/assets/uploads/hero1.jpg'), tag: 'GRATIS ONGKIR', tagColor: '#6A1B9A', title: 'Belanja di atas\nRp 50.000', sub: 'Gratis ongkos kirim ke seluruh kota' },
+  { id: 'banner-1', image: require('@/assets/uploads/about5.jpg'), tag: 'PROMO', tagColor: '#FF7043', title: 'PEMBELIAN PERTAMA \n DISKON 10%', sub: 'Sayuran hidroponik segar dari kebun' },
+  { id: 'banner-2', image: require('@/assets/uploads/about2.jpg'), tag: 'NEW ARRIVAL', tagColor: '#1565C0', title: 'Produk segar\ntiba setiap hari', sub: 'ayo ke kebun hydroponik kami' },
+  { id: 'banner-3', image: require('@/assets/uploads/hero1.jpg'), tag: 'GRATIS ONGKIR', tagColor: '#6A1B9A', title: 'Belanja di atas\nRp 10.000', sub: 'Gratis ongkos kirim di dalam kota' },
 ];
 
 type BannerSliderProps = Readonly<{
