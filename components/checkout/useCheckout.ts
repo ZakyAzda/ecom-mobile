@@ -23,7 +23,12 @@ function generateId(): string {
 
 export function useCheckout(params: CheckoutParams) {
   const router = useRouter();
-  const isPaymentProcessed = useRef(false);
+
+  // ✅ FIX: Gunakan ref untuk track status pembayaran agar tidak ter-reset oleh re-render
+  // Midtrans Snap SELALU fire onClose setelah onSuccess/onPending/onError
+  // Ref ini mencegah "close" modal muncul setelah status sudah ditentukan
+  const paymentStatusRef = useRef<'idle' | 'success' | 'pending' | 'error'>('idle');
+
   const [savedAddresses, setSavedAddresses] = useState<SavedAddress[]>([]);
   const [selectedAddressId, setSelectedAddressId] = useState<string | null>(null);
   const [showAddressForm, setShowAddressForm] = useState(false);
@@ -41,11 +46,11 @@ export function useCheckout(params: CheckoutParams) {
   const [showSuccess, setShowSuccess] = useState(false);
   const [createdOrderId, setCreatedOrderId] = useState<number | null>(null);
 
-  // ✅ Midtrans WebView
+  // Midtrans WebView
   const [showMidtrans, setShowMidtrans] = useState(false);
   const [snapToken, setSnapToken] = useState('');
 
-  // ✅ Pending/Close/Error modal (pengganti Alert)
+  // Pending/Close/Error modal
   const [showPendingModal, setShowPendingModal] = useState(false);
   const [pendingModalType, setPendingModalType] = useState<PendingModalType>('close');
   const [pendingErrorMessage, setPendingErrorMessage] = useState('');
@@ -164,6 +169,9 @@ export function useCheckout(params: CheckoutParams) {
       return;
     }
 
+    // ✅ Reset status ref setiap kali mulai checkout baru
+    paymentStatusRef.current = 'idle';
+
     setLoading(true);
     try {
       const res = await orderAPI.checkout(payload);
@@ -193,61 +201,72 @@ export function useCheckout(params: CheckoutParams) {
     }
   };
 
-  // ✅ Handle hasil Midtrans — pakai modal, bukan Alert
+  // ✅ FIX UTAMA: Handle hasil Midtrans
+  // Midtrans Snap SELALU trigger onClose setelah onSuccess/onPending/onError
+  // Solusi: gunakan ref untuk track apakah sudah ada final status
   const handleMidtransResult = (result: {
-  status: 'success' | 'pending' | 'error' | 'close';
-  result?: any;
-}) => {
-  setShowMidtrans(false);
+    status: 'success' | 'pending' | 'error' | 'close';
+    result?: any;
+  }) => {
+    // ✅ Selalu tutup WebView dulu
+    setShowMidtrans(false);
 
-  if (result.status === 'close' && isPaymentProcessed.current) {
-      return;
-    }
+    switch (result.status) {
+      case 'success':
+        // ✅ Set ref ke 'success' SEBELUM state update
+        paymentStatusRef.current = 'success';
 
-  switch (result.status) {
-    case 'success':
-      isPaymentProcessed.current = true;
-      if (createdOrderId) {
-        import('@/services/api').then(m => {
-          m.default.post('/api/payment/update-status', {
-            order_id: createdOrderId,
-            status: 'PENGIRIMAN',
-          }).catch(e => console.warn('Gagal update status:', e));
-        });
-      }
-      setShowSuccess(true);
-      break;
-
-    case 'pending':
-      isPaymentProcessed.current = true;
-      setPendingModalType('pending');
-      setPendingErrorMessage('');
-      setShowPendingModal(true);
-      break;
-
-    case 'error':
-      isPaymentProcessed.current = true;
-      setPendingModalType('error');
-      setPendingErrorMessage(result.result?.status_message ?? '');
-      setShowPendingModal(true);
-      break;
-
-    case 'close':
-      if (isPaymentProcessed && isPaymentProcessed.current) {
-           return;
+        if (createdOrderId) {
+          import('@/services/api').then(m => {
+            m.default.post('/api/payment/update-status', {
+              order_id: createdOrderId,
+              status: 'PENGIRIMAN',
+            }).catch(e => console.warn('Gagal update status:', e));
+          });
         }
-      setPendingModalType('close');
-      setPendingErrorMessage('');
-      setShowPendingModal(true);
-      router.push('/(tabs)/order' as any);
+        setShowSuccess(true);
         break;
-  }
-};
 
-  // ✅ Handler dari PendingPaymentModal
+      case 'pending':
+        // ✅ Set ref ke 'pending' SEBELUM state update
+        paymentStatusRef.current = 'pending';
+
+        setPendingModalType('pending');
+        setPendingErrorMessage('');
+        setShowPendingModal(true);
+        break;
+
+      case 'error':
+        // ✅ Set ref ke 'error' SEBELUM state update
+        paymentStatusRef.current = 'error';
+
+        setPendingModalType('error');
+        setPendingErrorMessage(result.result?.status_message ?? '');
+        setShowPendingModal(true);
+        break;
+
+      case 'close':
+        // ✅ FIX: Cek ref BUKAN isPaymentProcessed.current (yang dulu selalu false)
+        // Jika sudah ada status final (success/pending/error), abaikan event close
+        if (paymentStatusRef.current !== 'idle') {
+          console.log('[Checkout] Ignoring close event, payment already processed:', paymentStatusRef.current);
+          return;
+        }
+
+        // Hanya tampilkan modal "belum selesai" jika user BENAR-BENAR menutup popup
+        // tanpa menyelesaikan pembayaran
+        setPendingModalType('close');
+        setPendingErrorMessage('');
+        setShowPendingModal(true);
+        break;
+    }
+  };
+
+  // Handler dari PendingPaymentModal
   const handlePayAgain = () => {
     setShowPendingModal(false);
-    // Buka ulang Midtrans dengan token yang sama
+    // Reset ref agar bisa bayar ulang
+    paymentStatusRef.current = 'idle';
     if (snapToken) {
       setShowMidtrans(true);
     }
@@ -265,8 +284,6 @@ export function useCheckout(params: CheckoutParams) {
     setShowPendingModal(false);
     router.push('/(tabs)' as any);
   };
-
-  
 
   return {
     savedAddresses,
@@ -289,7 +306,7 @@ export function useCheckout(params: CheckoutParams) {
     showMidtrans,
     snapToken,
     handleMidtransResult,
-    // ✅ Pending/Error/Close modal
+    // Pending/Error/Close modal
     showPendingModal,
     pendingModalType,
     pendingErrorMessage,

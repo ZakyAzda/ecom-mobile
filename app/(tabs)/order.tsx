@@ -1,5 +1,5 @@
 import { SafeAreaView } from 'react-native-safe-area-context';
-import React, { useEffect, useState, useCallback } from 'react';
+import React, { useEffect, useState, useCallback, useRef } from 'react';
 import {
   View, Text, FlatList, StyleSheet, TouchableOpacity,
   ActivityIndicator, StatusBar, RefreshControl, Alert,
@@ -49,6 +49,10 @@ export default function OrdersScreen() {
   const [loadingPayment, setLoadingPayment] = useState<number | null>(null);
   const [currentPayingOrderId, setCurrentPayingOrderId] = useState<number | null>(null);
 
+  // ✅ FIX: Gunakan ref untuk track status pembayaran
+  // Midtrans Snap SELALU fire onClose setelah onSuccess/onPending/onError
+  const paymentStatusRef = useRef<'idle' | 'success' | 'pending' | 'error'>('idle');
+
   // Pending/Error/Close modal state
   const [showPendingModal, setShowPendingModal] = useState(false);
   const [pendingModalType, setPendingModalType] = useState<PendingModalType>('close');
@@ -74,7 +78,9 @@ export default function OrdersScreen() {
 
   // ── Tombol "Bayar Sekarang" ────────────────────────────────────────────────
   const handlePay = async (order: Order) => {
-    setCurrentPayingOrderId(order.ID); // ✅ simpan order yang sedang dibayar
+    setCurrentPayingOrderId(order.ID);
+    // ✅ Reset ref setiap kali mulai sesi pembayaran baru
+    paymentStatusRef.current = 'idle';
     setLoadingPayment(order.ID);
     try {
       const res = await api.post('/api/payment/snap-token', { order_id: order.ID });
@@ -92,21 +98,25 @@ export default function OrdersScreen() {
   };
 
   // ── Handle hasil Midtrans WebView ─────────────────────────────────────────
+  // ✅ FIX UTAMA: Midtrans Snap SELALU trigger onClose setelah onSuccess/onPending/onError
   const handleMidtransResult = (result: PaymentResult) => {
+    // ✅ Selalu tutup WebView dulu
     setShowMidtrans(false);
 
     switch (result.status) {
       case 'success':
-        // ✅ Update status order ke PENGIRIMAN langsung dari client
+        // ✅ Set ref ke 'success' SEBELUM state update
+        paymentStatusRef.current = 'success';
+
         if (currentPayingOrderId) {
           api.post('/api/payment/update-status', {
             order_id: currentPayingOrderId,
             status: 'PENGIRIMAN',
           })
-            .then(() => fetchOrders()) // ✅ refresh list setelah status terupdate
+            .then(() => fetchOrders())
             .catch(e => {
               console.warn('Gagal update status:', e);
-              fetchOrders(); // tetap refresh meski update gagal
+              fetchOrders();
             });
         }
         Alert.alert(
@@ -117,21 +127,32 @@ export default function OrdersScreen() {
         break;
 
       case 'pending':
-        // ✅ Tampil modal pending — user belum menyelesaikan pembayaran
+        // ✅ Set ref ke 'pending' SEBELUM state update
+        paymentStatusRef.current = 'pending';
+
         setPendingModalType('pending');
         setPendingErrorMessage('');
         setShowPendingModal(true);
         break;
 
       case 'error':
-        // ✅ Tampil modal error — pembayaran gagal
+        // ✅ Set ref ke 'error' SEBELUM state update
+        paymentStatusRef.current = 'error';
+
         setPendingModalType('error');
         setPendingErrorMessage(result.result?.status_message ?? '');
         setShowPendingModal(true);
         break;
 
       case 'close':
-        // ✅ Tampil modal close — user menutup WebView sebelum selesai
+        // ✅ FIX: Jika sudah ada status final, abaikan event close
+        // Karena Midtrans selalu fire onClose setelah event lain
+        if (paymentStatusRef.current !== 'idle') {
+          console.log('[Orders] Ignoring close event, payment already processed:', paymentStatusRef.current);
+          return;
+        }
+
+        // Hanya tampilkan modal jika user BENAR-BENAR menutup popup tanpa bayar
         setPendingModalType('close');
         setPendingErrorMessage('');
         setShowPendingModal(true);
@@ -142,7 +163,8 @@ export default function OrdersScreen() {
   // ── Handler dari PendingPaymentModal ──────────────────────────────────────
   const handlePayAgain = () => {
     setShowPendingModal(false);
-    // Buka ulang Midtrans dengan token yang sama
+    // ✅ Reset ref agar bisa bayar ulang
+    paymentStatusRef.current = 'idle';
     if (snapToken) {
       setShowMidtrans(true);
     }

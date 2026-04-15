@@ -2,6 +2,7 @@ import React, { useEffect, useRef } from 'react';
 import {
   View,
   Text,
+  Image,
   StyleSheet,
   Animated,
   Dimensions,
@@ -16,15 +17,21 @@ type Props = {
 };
 
 export default function SplashScreen({ onFinish }: Props) {
-  // Animated values
-  const logoScale    = useRef(new Animated.Value(0.3)).current;
-  const logoOpacity  = useRef(new Animated.Value(0)).current;
-  const textOpacity  = useRef(new Animated.Value(0)).current;
-  const textY        = useRef(new Animated.Value(20)).current;
-  const tagOpacity   = useRef(new Animated.Value(0)).current;
-  const circle1Scale = useRef(new Animated.Value(0)).current;
-  const circle2Scale = useRef(new Animated.Value(0)).current;
+  // Animated values (semua tetap sama seperti sebelumnya)
+  const logoScale     = useRef(new Animated.Value(0.3)).current;
+  const logoOpacity   = useRef(new Animated.Value(0)).current;
+  const textOpacity   = useRef(new Animated.Value(0)).current;
+  const textY         = useRef(new Animated.Value(20)).current;
+  const tagOpacity    = useRef(new Animated.Value(0)).current;
+  const circle1Scale  = useRef(new Animated.Value(0)).current;
+  const circle2Scale  = useRef(new Animated.Value(0)).current;
   const screenOpacity = useRef(new Animated.Value(1)).current;
+
+  // ✨ Tambahan: animasi khusus untuk foto logo
+  const logoRotate    = useRef(new Animated.Value(0)).current;
+  const logoPulse     = useRef(new Animated.Value(1)).current;
+  const ringScale     = useRef(new Animated.Value(0.8)).current;
+  const ringOpacity   = useRef(new Animated.Value(0)).current;
 
   useEffect(() => {
     Animated.sequence([
@@ -34,83 +41,118 @@ export default function SplashScreen({ onFinish }: Props) {
         Animated.spring(circle2Scale, { toValue: 1, tension: 40, friction: 10, useNativeDriver: true, delay: 150 } as any),
       ]),
 
-      // 2. Logo muncul dengan spring
+      // 2. Logo muncul dengan spring + rotate masuk dari -15deg ke 0
       Animated.parallel([
         Animated.spring(logoScale, { toValue: 1, tension: 80, friction: 6, useNativeDriver: true }),
         Animated.timing(logoOpacity, { toValue: 1, duration: 300, useNativeDriver: true }),
+        Animated.spring(logoRotate, { toValue: 1, tension: 60, friction: 8, useNativeDriver: true }), // ← rotate masuk
       ]),
 
-      // 3. Teks nama app muncul slide up
+      // 3. Ring pulse muncul setelah logo tampil
+      Animated.parallel([
+        Animated.timing(ringOpacity, { toValue: 1, duration: 200, useNativeDriver: true }),
+        Animated.spring(ringScale, { toValue: 1.4, tension: 40, friction: 6, useNativeDriver: true }),
+      ]),
+
+      // 4. Teks nama app muncul slide up
       Animated.parallel([
         Animated.timing(textOpacity, { toValue: 1, duration: 400, useNativeDriver: true }),
         Animated.spring(textY, { toValue: 0, tension: 80, friction: 8, useNativeDriver: true }),
+        // Ring fade out bersamaan
+        Animated.timing(ringOpacity, { toValue: 0, duration: 400, useNativeDriver: true }),
       ]),
 
-      // 4. Tagline muncul
+      // 5. Tagline muncul
       Animated.timing(tagOpacity, { toValue: 1, duration: 350, useNativeDriver: true }),
 
-      // 5. Tahan sebentar
+      // 6. Tahan sebentar
       Animated.delay(800),
 
-      // 6. Fade out seluruh screen
+      // 7. Fade out seluruh screen
       Animated.timing(screenOpacity, { toValue: 0, duration: 400, useNativeDriver: true }),
     ]).start(() => onFinish());
+
+    // ✨ Pulse logo berjalan terus (loop) selama splash tampil
+    Animated.loop(
+      Animated.sequence([
+        Animated.timing(logoPulse, { toValue: 1.08, duration: 800, useNativeDriver: true }),
+        Animated.timing(logoPulse, { toValue: 1,    duration: 800, useNativeDriver: true }),
+      ])
+    ).start();
   }, []);
+
+  // Rotate interpolation: dari -15deg masuk ke 0deg
+  const rotateDeg = logoRotate.interpolate({
+    inputRange:  [0, 1],
+    outputRange: ['-15deg', '0deg'],
+  });
 
   return (
     <Animated.View style={[styles.container, { opacity: screenOpacity }]}>
       <StatusBar barStyle="light-content" backgroundColor={Brand.primary} />
 
-      {/* Dekorasi lingkaran background */}
-      <Animated.View
-        style={[
-          styles.circle1,
-          { transform: [{ scale: circle1Scale }] },
-        ]}
-      />
-      <Animated.View
-        style={[
-          styles.circle2,
-          { transform: [{ scale: circle2Scale }] },
-        ]}
-      />
+      {/* Dekorasi lingkaran background — tidak berubah */}
+      <Animated.View style={[styles.circle1, { transform: [{ scale: circle1Scale }] }]} />
+      <Animated.View style={[styles.circle2, { transform: [{ scale: circle2Scale }] }]} />
       <View style={styles.circle3} />
 
-      {/* Konten tengah */}
       <View style={styles.content}>
-        {/* Logo / ikon */}
+
+        {/* Wrapper logo dengan ring pulse di belakang */}
         <Animated.View
           style={[
             styles.logoWrapper,
             {
-              opacity: logoOpacity,
-              transform: [{ scale: logoScale }],
+              opacity:   logoOpacity,
+              transform: [
+                { scale:   logoScale },
+                { rotate:  rotateDeg },  // ← rotate masuk
+              ],
             },
           ]}
         >
-          <Text style={styles.logoEmoji}>🌿</Text>
+          {/* ✨ Ring pulse — lingkaran yang memancar di belakang logo */}
+          <Animated.View
+            style={[
+              styles.logoRing,
+              {
+                opacity:   ringOpacity,
+                transform: [{ scale: ringScale }],
+              },
+            ]}
+          />
+
+          {/* ✨ Foto logo dengan pulse scale */}
+          <Animated.Image
+            source={require('@/assets/uploads/logo.png')} // ← sesuaikan path logo kamu
+            style={[
+              styles.logoImage,
+              { transform: [{ scale: logoPulse }] }, // ← pulse
+            ]}
+            resizeMode="contain"
+          />
         </Animated.View>
 
-        {/* Nama app */}
+        {/* Nama app — tidak berubah */}
         <Animated.Text
           style={[
             styles.appName,
             {
-              opacity: textOpacity,
+              opacity:   textOpacity,
               transform: [{ translateY: textY }],
             },
           ]}
         >
-          GreenMart
+          Sayur On Delivery
         </Animated.Text>
 
-        {/* Tagline */}
+        {/* Tagline — tidak berubah */}
         <Animated.Text style={[styles.tagline, { opacity: tagOpacity }]}>
-          Belanja segar, hidup lebih baik
+          Beli sayur tidak harus dari pasar
         </Animated.Text>
       </View>
 
-      {/* Loading dots bawah */}
+      {/* Loading dots — tidak berubah */}
       <Animated.View style={[styles.dotsWrapper, { opacity: tagOpacity }]}>
         <LoadingDots />
       </Animated.View>
@@ -118,6 +160,7 @@ export default function SplashScreen({ onFinish }: Props) {
   );
 }
 
+// LoadingDots — tidak berubah sama sekali
 function LoadingDots() {
   const dot1 = useRef(new Animated.Value(0.3)).current;
   const dot2 = useRef(new Animated.Value(0.3)).current;
@@ -128,12 +171,11 @@ function LoadingDots() {
       Animated.loop(
         Animated.sequence([
           Animated.delay(delay),
-          Animated.timing(dot, { toValue: 1, duration: 300, useNativeDriver: true }),
+          Animated.timing(dot, { toValue: 1,   duration: 300, useNativeDriver: true }),
           Animated.timing(dot, { toValue: 0.3, duration: 300, useNativeDriver: true }),
           Animated.delay(600),
         ])
       );
-
     Animated.parallel([anim(dot1, 0), anim(dot2, 200), anim(dot3, 400)]).start();
   }, []);
 
@@ -155,7 +197,7 @@ const styles = StyleSheet.create({
     zIndex: 999,
   },
 
-  // Dekorasi
+  // Dekorasi — tidak berubah
   circle1: {
     position: 'absolute',
     width: width * 0.8,
@@ -191,24 +233,34 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     gap: 12,
   },
+
+  // ✨ Wrapper logo — ukuran disesuaikan untuk foto
   logoWrapper: {
-    width: 100,
-    height: 100,
-    borderRadius: 30,
-    backgroundColor: 'rgba(255,255,255,0.15)',
+    width: 240,
+    height: 240,
     justifyContent: 'center',
     alignItems: 'center',
     marginBottom: 8,
-    // Inner glow effect
-    shadowColor: '#fff',
-    shadowOffset: { width: 0, height: 0 },
-    shadowOpacity: 0.3,
-    shadowRadius: 20,
-    elevation: 10,
   },
-  logoEmoji: {
-    fontSize: 52,
+
+  // ✨ Ring pulse di belakang logo
+  logoRing: {
+    position: 'absolute',
+    width: 240,
+    height: 240,
+    borderRadius: 60,
+    borderWidth: 2,
+    borderColor: 'rgba(255,255,255,0.5)',
   },
+
+  // ✨ Foto logo
+  logoImage: {
+    width: 240,
+    height: 240,
+    borderRadius: 24,   // ← hapus kalau logo sudah punya shape sendiri
+  },
+
+  // Teks — tidak berubah
   appName: {
     fontSize: 38,
     fontWeight: '900',
@@ -222,7 +274,7 @@ const styles = StyleSheet.create({
     letterSpacing: 0.3,
   },
 
-  // Loading dots
+  // Loading dots — tidak berubah
   dotsWrapper: {
     position: 'absolute',
     bottom: 60,
